@@ -1,0 +1,12 @@
+{
+  "name": "svaib",
+  "version": "0.1.0",
+  "description": "Second Value AI Brain — скиллы, навигация по управленческому пространству и подключение к платформе svaib",
+  "author": {
+    "name": "svaib"
+  },
+  "homepage": "https://svaib.com",
+  "skills": [
+    "./skills/"
+  ]
+}

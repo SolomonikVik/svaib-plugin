@@ -1,0 +1,126 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" first-prompt",
+            "timeout": 15,
+            "statusMessage": "Подаю карту пространства (первый запрос сессии)"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" prompt",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*__whoami",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-whoami",
+            "timeout": 15,
+            "statusMessage": "Подкарта зоны пользователя"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Glob|Grep|Bash|mcp__workspace__bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" node-enter",
+            "timeout": 15,
+            "statusMessage": "Подкарта узла при первом обращении"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" compact",
+            "timeout": 15,
+            "statusMessage": "Возвращаю карту после сжатия"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_file_spec.py\" compact",
+            "timeout": 10,
+            "statusMessage": "Снимаю метки спецификаций после сжатия"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/check_deferred_actions.py\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|apply_patch|Bash|exec_command|shell|local_shell|unified_exec|mcp__workspace__bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_file_spec.py\" pre-write",
+            "timeout": 10,
+            "statusMessage": "Спецификация файла до записи"
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" skill",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_file_spec.py\" compact",
+            "timeout": 10,
+            "statusMessage": "Снимаю метки спецификаций после сжатия"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" end",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

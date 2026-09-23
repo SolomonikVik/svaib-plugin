@@ -1,0 +1,14 @@
+{
+  "name": "svaib",
+  "owner": {
+    "name": "svaib"
+  },
+  "plugins": [
+    {
+      "name": "svaib",
+      "source": "./plugins/svaib",
+      "version": "0.1.0",
+      "description": "Second Value AI Brain — скиллы, навигация по управленческому пространству и подключение к платформе svaib"
+    }
+  ]
+}

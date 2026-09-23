@@ -1,0 +1,84 @@
+{
+  "plugin": "svaib",
+  "version": "0.1.0",
+  "skills": [
+    "content-update",
+    "metrics-values",
+    "rhythm-meeting-agenda",
+    "rhythm-meeting-debrief",
+    "roles-strategy",
+    "send-telegram",
+    "space-align",
+    "space-scaffold",
+    "space-toolbox",
+    "transcript-extract"
+  ],
+  "agents": [
+    "svaib-scout"
+  ],
+  "hooks": [
+    {
+      "script": "check_deferred_actions.py",
+      "events": [
+        "Stop"
+      ]
+    },
+    {
+      "script": "hook_space.py",
+      "events": []
+    },
+    {
+      "script": "inject_file_spec.py",
+      "events": [
+        "PostCompact",
+        "PreToolUse",
+        "SessionStart"
+      ]
+    },
+    {
+      "script": "inject_space_map.py",
+      "events": [
+        "PostToolUse",
+        "SessionStart",
+        "UserPromptSubmit"
+      ]
+    },
+    {
+      "script": "space_map.py",
+      "events": []
+    },
+    {
+      "script": "usage_claude.py",
+      "events": []
+    },
+    {
+      "script": "usage_log.py",
+      "events": [
+        "PreToolUse",
+        "SessionEnd",
+        "Stop",
+        "UserPromptSubmit"
+      ]
+    }
+  ],
+  "mcp": [
+    {
+      "name": "svaib",
+      "url": "https://api.svaib.com/mcp"
+    }
+  ],
+  "former_names": {
+    "skills": {
+      "agenda": "rhythm-meeting-agenda",
+      "meeting-analysis": "rhythm-meeting-debrief",
+      "meeting-analysis-beta": "rhythm-meeting-debrief",
+      "meeting-protocol": "rhythm-meeting-debrief",
+      "meeting-analysis-old": null,
+      "metrics-analysis": "metrics-values",
+      "scaffold": "space-scaffold",
+      "scaffold-align": "space-align",
+      "toolbox": "space-toolbox",
+      "email-assistant": null
+    }
+  }
+}

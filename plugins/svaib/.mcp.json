@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "svaib": {
+      "type": "http",
+      "url": "https://api.svaib.com/mcp"
+    }
+  }
+}
