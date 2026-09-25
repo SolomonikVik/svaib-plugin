@@ -7,7 +7,7 @@
     {
       "name": "svaib",
       "source": "./plugins/svaib",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "Second Value AI Brain — скиллы, навигация по управленческому пространству и подключение к платформе svaib"
     }
   ]
