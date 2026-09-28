@@ -143,11 +143,20 @@ def marker_path(key: str, spec: str) -> str:
     return os.path.join(state_dir(), "sessions", f"{key}.spec.{SID_RE.sub('_', spec)}")
 
 
-def marker_set(key: str, spec: str) -> None:
+def marker_set(key: str, spec: str, call: str = "") -> None:
+    """В метке — id вызова, на котором спецификация выдана: второй экземпляр хука узнаёт свой же вызов."""
     p = marker_path(key, spec)
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "a", encoding="utf-8"):
-        pass
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(call)
+
+
+def marker_call(key: str, spec: str) -> str:
+    try:
+        with open(marker_path(key, spec), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
 
 
 def markers_clear(sid: str) -> None:
@@ -397,6 +406,12 @@ def pre_write(hook_input: dict) -> None:
     pending = [s for s in [GENERAL] + list(files) if not os.path.exists(marker_path(key, s))]
     if not pending:
         fresh = [s for s in files if time.time() - os.path.getmtime(marker_path(key, s)) < SAME_TURN]
+        call = hook_input.get("tool_use_id") or ""
+        if fresh and call and all(marker_call(key, s) == call for s in fresh):
+            # тот же вызов: хук стоит дважды (плагин и локальная копия); хост показывает один отказ
+            # из двух, поэтому второй молчит, и в силе отказ со спецификацией
+            log("dup-instance", specs=fresh)
+            return
         if fresh:
             deny(f"Запись в {listed([f for s in fresh for f in files[s]])} остановлена: спецификация "
                  "этого типа только что выдана в отказе соседнего вызова этого же хода. Прочитай её там, "
@@ -421,7 +436,7 @@ def pre_write(hook_input: dict) -> None:
     note = version_note(root, sdir)
     reason = "\n\n".join([head] + ([note] if note else []) + ([more] if rest else []) + [part for _, part in batch])
     for s, _ in batch:                        # метка до вывода: сбой записи метки не зациклит отказы
-        marker_set(key, s)
+        marker_set(key, s, hook_input.get("tool_use_id") or "")
     deny(reason)
     log("deny", files=names, specs=[s for s, _ in batch], rest=rest, chars=len(reason))
 

@@ -200,9 +200,17 @@ def marker_set(session_id: str) -> bool:
     return True
 
 
+def node_key(hook_input: dict) -> str:
+    """Ключ меток подкарт: у субагента — свой. Хост даёт субагенту session_id родителя и agent_id
+    (Claude Code и Codex, зонд 28.09); без agent_id скаут забирал подкарты у основного агента."""
+    sid = SID_RE.sub("_", hook_input.get("session_id") or "")[:80]
+    agent = SID_RE.sub("_", hook_input.get("agent_id") or "")[:40]
+    return f"{sid}.{agent}" if agent and sid else sid
+
+
 def node_marker_path(session_id: str, node: str) -> str:
     import hashlib
-    sid = SID_RE.sub("_", session_id)[:80]
+    sid = SID_RE.sub("_", session_id)[:121]
     raw = node.strip("/")
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
     # хеш — за пределами усечения: длинный путь резать можно, хеш — нет,
@@ -228,12 +236,12 @@ def node_marker_set(session_id: str, node: str) -> bool:
 
 
 def node_markers_clear(session_id: str) -> None:
-    """После сжатия подкарты узлов из контекста ушли — пустить их снова."""
+    """После сжатия подкарты узлов из контекста ушли — пустить их снова (и субагентам сессии)."""
     sid = SID_RE.sub("_", session_id)[:80]
     d = os.path.join(state_dir(), "sessions")
     try:
         for name in os.listdir(d):
-            if name.startswith(f"{sid}.node."):
+            if name.startswith(f"{sid}.") and ".node." in name:
                 os.remove(os.path.join(d, name))
     except OSError:
         pass
@@ -516,6 +524,7 @@ WHOAMI_RE = re.compile(r"^mcp__.+__whoami$")
 
 def run(mode: str, hook_input: dict) -> None:
     sid = hook_input.get("session_id") or ""
+    nkey = node_key(hook_input)
     if mode not in MODES:
         log("skip", mode=mode, reason="unknown mode")
         print(f"inject_space_map: неизвестный режим {mode!r}; ожидается один из {MODES}", file=sys.stderr)
@@ -549,7 +558,7 @@ def run(mode: str, hook_input: dict) -> None:
         event = hook_input.get("hook_event_name") or "PostToolUse"   # событие задаёт settings: Pre или Post
         for t in targets_of(hook_input, root):
             for n in nodes_of(root, t):
-                if n not in nodes and not node_marker_exists(sid, n):
+                if n not in nodes and not node_marker_exists(nkey, n):
                     nodes.append(n)
         if not nodes:
             return
@@ -569,7 +578,7 @@ def run(mode: str, hook_input: dict) -> None:
     if mode == "first-prompt" and not marker_set(sid):
         return  # параллельный запуск уже доставил
     if mode == "node-enter":
-        won = [n for n in nodes if node_marker_set(sid, n)]
+        won = [n for n in nodes if node_marker_set(nkey, n)]
         if not won:
             return  # параллельный вызов уже доставил все подкарты
         if won != nodes:   # часть подкарт доставил параллельный вызов — отдаём только свои
@@ -583,7 +592,7 @@ def run(mode: str, hook_input: dict) -> None:
         if mode == "compact":
             node_markers_clear(sid)          # подкарты узлов ушли со сжатием — пустить снова
         for u in meta.get("units") or []:    # подкарты зоны уже в контексте — при входе не дублировать
-            node_marker_set(sid, u)
+            node_marker_set(nkey, u)
     if mode == "first-prompt":
         gc_markers()
 

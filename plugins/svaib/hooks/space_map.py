@@ -252,11 +252,19 @@ def subdirs(d: Path):
     )
 
 
-def dated_summary(files) -> str | None:
-    dated = sorted(f.name for f in files if DATED_RE.match(f.name))
+def dated_dirs(d: Path) -> list:
+    return [p for p in subdirs(d) if DATED_RE.match(p.name)]
+
+
+def dated_summary(files, dirs=()) -> str | None:
+    """Датированные файлы и папки — одной строкой: встреча с 4.2 — папка, а не файл."""
+    df = [f.name for f in files if DATED_RE.match(f.name)]
+    dd = [p.name for p in dirs if DATED_RE.match(p.name)]
+    dated = sorted(df + dd)
     if len(dated) < 3:
         return None
-    return f"{len(dated)} датированных файлов, {dated[0][:10]} … {dated[-1][:10]} — свежий выбирай листингом"
+    kind = "файлов и папок" if df and dd else ("папок" if dd else "файлов")
+    return f"{len(dated)} датированных {kind}, {dated[0][:10]} … {dated[-1][:10]} — свежий выбирай листингом"
 
 
 KIT_ELEMENTS = [
@@ -413,7 +421,7 @@ def node_map(node: Path, base: Path, deep: bool = False) -> str:
         lines.append(f"**{rel}/** — {mission}")
         lines.append("")
     files = md_files(node)
-    ds = dated_summary(files)
+    ds = dated_summary(files, dated_dirs(node))
     plain = [f for f in files if not (DATED_RE.match(f.name) and ds)
              and f.name not in ("CLAUDE.md", "AGENTS.md")]
     for f in plain[:15]:
@@ -427,9 +435,13 @@ def node_map(node: Path, base: Path, deep: bool = False) -> str:
     # только узел (хук node-enter: отдельный процесс на каждый вход, полный обход svaib
     # под нагрузкой стенда стоил 0,6–1,4 с на вызов)
     counts = _MD_COUNTS.get(base.resolve()) or md_counts(node)
+    if (node / ".svaib").is_dir():                     # скрытая, но на неё ведут маршруты корня
+        lines.append("- `.svaib/` — служебное агента: правила владельца, находки, версия пространства")
     for sd in subdirs(node):
+        if ds and DATED_RE.match(sd.name):
+            continue                                   # датированная папка — в строке сводки выше
         sfiles = md_files(sd)
-        sds = dated_summary(sfiles)
+        sds = dated_summary(sfiles, dated_dirs(sd))
         m = mission_of_dir(sd)
         n = counts.get(sd.resolve(), 0)
         # служебные — не узлы даже с README/китом, вход туда не даёт хук (NOT_NODES)
