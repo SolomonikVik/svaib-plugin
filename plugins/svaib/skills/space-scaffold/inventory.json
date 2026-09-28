@@ -1,6 +1,6 @@
 {
   "plugin": "svaib",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "skills": [
     "content-update",
     "metrics-values",
@@ -9,6 +9,7 @@
     "roles-strategy",
     "send-telegram",
     "space-align",
+    "space-onboarding",
     "space-scaffold",
     "space-toolbox",
     "transcript-extract"

@@ -1,0 +1,296 @@
+{
+ "schema": 1,
+ "catalog": 1,
+ "stages": [
+  {
+   "id": "user.connect",
+   "track": "user",
+   "kind": "base",
+   "order": 10,
+   "title": "Подключение",
+   "audiences": [],
+   "requires": [],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "user.space",
+   "track": "user",
+   "kind": "base",
+   "order": 20,
+   "title": "Пространство",
+   "audiences": [],
+   "requires": [
+    "user.connect"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "user.profile",
+   "track": "user",
+   "kind": "base",
+   "order": 30,
+   "title": "Кто я",
+   "audiences": [],
+   "requires": [
+    "user.space"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "user.zone",
+   "track": "user",
+   "kind": "base",
+   "order": 40,
+   "title": "Моя зона",
+   "audiences": [],
+   "requires": [
+    "user.profile"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "user.first-talk",
+   "track": "user",
+   "kind": "base",
+   "order": 50,
+   "title": "Первые вопросы",
+   "audiences": [],
+   "requires": [
+    "user.space"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "user.first-work",
+   "track": "user",
+   "kind": "base",
+   "order": 60,
+   "title": "Первая работа",
+   "audiences": [],
+   "requires": [
+    "user.zone"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "user.keep-context",
+   "track": "user",
+   "kind": "base",
+   "order": 70,
+   "title": "Обновляю память",
+   "audiences": [],
+   "requires": [
+    "user.space"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "tool.meeting-record",
+   "track": "user",
+   "kind": "tool",
+   "order": 80,
+   "title": "Запись и транскрибация встреч",
+   "audiences": [],
+   "requires": [
+    "user.connect"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "tool.meeting-debrief",
+   "track": "user",
+   "kind": "tool",
+   "order": 90,
+   "title": "Разбор встречи",
+   "audiences": [],
+   "requires": [
+    "user.connect"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "tool.agenda",
+   "track": "user",
+   "kind": "tool",
+   "order": 100,
+   "title": "Повестка",
+   "audiences": [],
+   "requires": [
+    "user.connect"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "tool.metrics",
+   "track": "user",
+   "kind": "tool",
+   "order": 110,
+   "title": "Метрики",
+   "audiences": [],
+   "requires": [
+    "user.connect"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "tool.calendar",
+   "track": "user",
+   "kind": "tool",
+   "order": 120,
+   "title": "Календарь",
+   "audiences": [],
+   "requires": [
+    "user.connect"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "tool.email",
+   "track": "user",
+   "kind": "tool",
+   "order": 130,
+   "title": "Почта",
+   "audiences": [],
+   "requires": [
+    "user.connect"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "tool.telegram",
+   "track": "user",
+   "kind": "tool",
+   "order": 140,
+   "title": "Telegram",
+   "audiences": [],
+   "requires": [
+    "user.connect"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "company.launched",
+   "track": "company",
+   "kind": "base",
+   "order": 10,
+   "title": "svaib запущен",
+   "audiences": [],
+   "requires": [],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "company.core",
+   "track": "company",
+   "kind": "base",
+   "order": 20,
+   "title": "Компания и CEO",
+   "audiences": [],
+   "requires": [
+    "company.launched"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "company.meetings",
+   "track": "company",
+   "kind": "base",
+   "order": 30,
+   "title": "Встречи",
+   "audiences": [],
+   "requires": [
+    "company.launched"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "company.metrics",
+   "track": "company",
+   "kind": "base",
+   "order": 40,
+   "title": "Показатели",
+   "audiences": [],
+   "requires": [
+    "company.launched"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "company.multiuser",
+   "track": "company",
+   "kind": "base",
+   "order": 50,
+   "title": "Команда в пространстве",
+   "audiences": [],
+   "requires": [
+    "company.launched"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "company.structure",
+   "track": "company",
+   "kind": "base",
+   "order": 60,
+   "title": "Структура",
+   "audiences": [],
+   "requires": [
+    "company.launched"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "company.projects",
+   "track": "company",
+   "kind": "base",
+   "order": 70,
+   "title": "Проекты",
+   "audiences": [],
+   "requires": [
+    "company.launched"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "company.leadership",
+   "track": "company",
+   "kind": "base",
+   "order": 80,
+   "title": "Вся команда руководителей",
+   "audiences": [],
+   "requires": [
+    "company.multiuser"
+   ],
+   "replaces": [],
+   "active": true
+  }
+ ],
+ "changelog": [
+  {
+   "catalog": 1,
+   "date": "2026-09-26",
+   "text": "Первый каталог"
+  }
+ ],
+ "content_sha": "7c4f552010e4008e2fa9044bf480275670d317a83266b210d6b4437fb139fe88"
+}

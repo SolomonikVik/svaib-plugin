@@ -16,6 +16,8 @@
 установленном пакете — новые скиллы подхватываются без настроек. Вне готового пространства
 (`hook_space.ready_usage_root`) обработчик выходит, не читая транскрипт и ничего не создавая.
 Состояние открытых вызовов — вне пространства, файл на сессию. Сбой — stderr и код 0.
+`кто` — `subject` из кэша идентичности хука карты (`space_map.read_cache`, тот же ключ, срок не
+важен) на момент вызова скилла, хранится в состоянии вызова; нет записи — клетка пустая.
 """
 from __future__ import annotations
 
@@ -201,6 +203,7 @@ def open_run(ev: dict, name, key: str, tool_use_id: str | None = None) -> None:
         if any(r.get("key") == key for r in runs) or (same_turn and not same_turn[-1].get("tool_use_id")
                                                       and same_turn[-1].get("skill") == skill[0]):
             return
+        run["who"] = who(root)  # кто запустил — на момент вызова: к записи строки аккаунт мог смениться
         runs.append(run)
     log("open", skill=skill[0], session=sid)
     sweep_state(sid)
@@ -227,6 +230,21 @@ def os_name() -> str:
     return f"{system} {platform.release()}".strip()
 
 
+def who(root: str) -> str:
+    """`subject` пользователя из кэша хука карты: ключ — email аккаунта Claude и корень базы.
+    Нет записи, чужой корень, другой аккаунт, сбой — пусто: человека не угадываем."""
+    try:
+        from pathlib import Path
+
+        import space_map  # генератор карты лежит рядом с хуком; грузится только при открытии вызова
+
+        rec = space_map.read_cache(space_map.account_email(), Path(root))
+        return rec["subject"] if rec else ""  # срок не нужен: subject_id неизменен, ключ — аккаунт и база
+    except Exception as e:  # noqa: BLE001 — без `кто` строка всё равно пишется
+        log("who failed", error=f"{type(e).__name__}: {e}")
+        return ""
+
+
 def cell(value) -> str:
     return "" if value is None else " ".join(str(value).replace("|", "/").split())
 
@@ -238,8 +256,8 @@ def row(run: dict, m: dict, session_id: str) -> str:
     harness = "cowork" if run.get("cowork") else ("claude-code " + (m["version"] or "")).strip()
     outcome = "ошибка" if m["error"] else ("завершён" if run.get("stopped_at") else "оборван")
     cells = [stamp[:-2] + ":" + stamp[-2:], run["skill"], run.get("version"), "", harness, " + ".join(m["models"]),
-             os_name(), host(), "", "", m["input"], m["output"], m["cache_read"], m["cache_write"], m["turns"],
-             m["tools"], m["agents"], m["agent_tokens"], max(0, round(end - run["start"])), outcome,
+             os_name(), host(), run.get("who"), "", m["input"], m["output"], m["cache_read"], m["cache_write"],
+             m["turns"], m["tools"], m["agents"], m["agent_tokens"], max(0, round(end - run["start"])), outcome,
              session_id[:8], ""]
     return "| " + " | ".join(cell(c) for c in cells) + " |"
 

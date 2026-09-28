@@ -578,7 +578,7 @@ def skills_registry(base: Path) -> str | None:
 # ---------------------------------------------------------------------------
 
 CACHE_TTL_HOURS = 24
-CACHE_VERSION = 2
+CACHE_VERSION = 3   # 3 — запись несёт `onboarding` из whoami; старая версия не читается, агент зовёт whoami заново
 
 
 def state_dir() -> Path:
@@ -634,11 +634,13 @@ def read_cache(email: str, base: Path) -> dict | None:
     d["units"] = [u for u in d["units"] if isinstance(u, str)]
     d["name"] = clean_name(d.get("name"))   # старая запись имени не несёт — пусто, не отказ
     d["preferences"] = clean_block(d.get("preferences"), PREFERENCES_LIMIT)
+    d["onboarding"] = d["onboarding"] if isinstance(d.get("onboarding"), dict) else None
     return d
 
 
 def write_cache(email: str, base: Path, rec: dict) -> Path | None:
-    """0600, атомарно (tmp + replace); без email — не пишется."""
+    """0600, атомарно (tmp + replace); без email — не пишется. `ts` записи сохраняется, если
+    есть: срок кэша отсчитывается от `whoami`, а не от поправки."""
     p = cache_path(email, base)
     if p is None:
         return None
@@ -647,8 +649,8 @@ def write_cache(email: str, base: Path, rec: dict) -> Path | None:
         os.chmod(p.parent, 0o700)
     except OSError:
         pass
-    rec = dict(rec, v=CACHE_VERSION, email=email, base=str(base.resolve()),
-               ts=_now().isoformat(timespec="seconds"))
+    rec = dict(rec, v=CACHE_VERSION, email=email, base=str(base.resolve()))
+    rec.setdefault("ts", _now().isoformat(timespec="seconds"))
     fd, tmp = tempfile.mkstemp(prefix=p.name + ".", suffix=".tmp", dir=str(p.parent))   # свой tmp на процесс
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -781,21 +783,31 @@ def space_rules(base: Path) -> str:
             "«Что дополняет эту инструкцию».\n\n" + body)
 
 
-def parse_whoami(raw) -> dict:
-    """Ответ whoami как его отдаёт PostToolUse (строка JSON) или объект."""
-    data = raw
-    if isinstance(data, str):
-        data = json.loads(data)
+def tool_payload(raw):
+    """Ответ MCP-ручки, как его отдаёт PostToolUse: строка JSON, content-блоки или объект
+    результата (`structuredContent` старше `content`). `structuredContent` берётся и у отказа:
+    `onboarding-conflict` несёт в нём текущий объект. Отказ без него (`isError`) — None."""
+    data = json.loads(raw) if isinstance(raw, str) else raw
+    if isinstance(data, dict) and "structuredContent" in data:
+        return data["structuredContent"]
+    if isinstance(data, dict) and data.get("isError"):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("content"), list):
+        data = data["content"]
     if isinstance(data, list):  # content-блоки MCP
         for block in data:
             if isinstance(block, dict) and block.get("type") == "text":
                 try:
-                    data = json.loads(block["text"])
-                    break
-                except (ValueError, KeyError):
+                    return json.loads(block["text"])
+                except (ValueError, KeyError, TypeError):
                     continue
-    if isinstance(data, dict) and "structuredContent" in data:
-        data = data["structuredContent"]
+        return None
+    return data
+
+
+def parse_whoami(raw) -> dict:
+    """Ответ whoami как его отдаёт PostToolUse (строка JSON) или объект."""
+    data = tool_payload(raw)
     if not isinstance(data, dict) or not data.get("subject_id"):
         raise ValueError("в ответе whoami нет subject_id")
     ws = data.get("workspace") or {}
@@ -803,7 +815,130 @@ def parse_whoami(raw) -> dict:
             "preferences": clean_block(data.get("preferences"), PREFERENCES_LIMIT),
             "tenant": str(data.get("tenant_id") or ""),
             "role": str(data.get("role") or ""), "about": str(data.get("about") or ""),
-            "profile_path": str(ws.get("profile_path") or "")}
+            "profile_path": str(ws.get("profile_path") or ""),
+            "onboarding": data["onboarding"] if isinstance(data.get("onboarding"), dict) else None}
+
+
+def apply_update_me(base: Path, raw) -> bool:
+    """После `update_me`: пришедшие в ответе `onboarding` и `preferences` — в кэш этой машины
+    (пустые `preferences` очищают), срок кэша не продлевается. Отказ `onboarding-conflict` несёт
+    текущий `onboarding` — пишется только он. Ни одного из полей или нет кэша — ничего."""
+    try:
+        data = tool_payload(raw)
+    except ValueError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    fields = {}
+    if isinstance(data.get("onboarding"), dict):
+        fields["onboarding"] = data["onboarding"]
+    if "preferences" in data and (data["preferences"] is None or isinstance(data["preferences"], str)):
+        fields["preferences"] = clean_block(data["preferences"] or "", PREFERENCES_LIMIT)
+    email = account_email()
+    rec = read_cache(email, base) if fields else None
+    if not rec:
+        return False
+    rec.pop("fresh", None)
+    return write_cache(email, base, dict(rec, **fields)) is not None
+
+
+# ---------------------------------------------------------------------------
+# Онбординг пользователя под строкой «За клавиатурой»: «два и два» — два последних
+# пройденных и два следующих этапа. План = каталог этапов плагина × личное человека ×
+# отметки (dev/it-onboarding/_plan.md, «Архитектура статусов»); тот же расчёт ведёт скилл
+# `space-onboarding`. Каталог — производный от таблиц методологии, его кладёт сборка рядом со
+# скиллом (как спецификации `space-scaffold` для inject_file_spec.py); без поставки блока нет.
+# ---------------------------------------------------------------------------
+
+STAGES_PATH = (Path(os.path.abspath(__file__)).parent.parent / "skills" / "space-onboarding" / "references"
+               / "stages.json")
+STATE_NOTES = {"waiting": "жду", "deferred": "отложен", "unverified": "не удалось проверить"}
+
+
+def load_stages() -> list | None:
+    try:
+        d = json.loads(STAGES_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return d.get("stages") if isinstance(d, dict) and isinstance(d.get("stages"), list) else None
+
+
+def onboarding_near(stages: list, ob: dict, role: str) -> tuple[list, list]:
+    """«Два и два»: ([(этап, id зачёта)] — два последних пройденных по `at`, [этап] — два следующих).
+    Применим: `track=user`, `active`, `audiences` пуст или содержит `audience`, этап базовый или
+    выбран в `tools`. Пройден: `done` на своём id, а без своей отметки — на предшественнике из
+    `replaces` (зачёт — по самому позднему). Следующие — по `order` из применимых непройденных, не `skip`, с пройденными `requires`.
+    Незнакомые id отметок не участвуют."""
+    marks = ob.get("marks") if isinstance(ob.get("marks"), dict) else {}
+    tools = ob.get("tools") if isinstance(ob.get("tools"), list) else []
+    audience = ob.get("audience") if isinstance(ob.get("audience"), str) and ob.get("audience") \
+        else ("ceo" if role == "owner" else "employee")
+    catalog = {s["id"]: s for s in stages if isinstance(s, dict) and isinstance(s.get("id"), str)}
+
+    def done_by(sid: str):
+        own = marks.get(sid)
+        if isinstance(own, dict):            # явная отметка важнее наследования
+            return (own, sid) if own.get("state") == "done" else None
+        best = None                          # из пройденных предшественников — самый поздний по `at`
+        for r in (catalog.get(sid) or {}).get("replaces") or []:
+            m = marks.get(r)
+            if isinstance(m, dict) and m.get("state") == "done" \
+                    and (best is None or str(m.get("at") or "") > str(best[0].get("at") or "")):
+                best = (m, r)
+        return best
+
+    def applicable(s: dict) -> bool:
+        aud = s.get("audiences") or []
+        return (s.get("track") == "user" and s.get("active") is True and (not aud or audience in aud)
+                and (s.get("kind") == "base" or s["id"] in tools))
+
+    mine = sorted((s for s in catalog.values() if applicable(s)),
+                  key=lambda s: s["order"] if isinstance(s.get("order"), int) else 10 ** 9)
+    done, nxt = [], []
+    for s in mine:
+        hit = done_by(s["id"])
+        if hit:
+            done.append((str(hit[0].get("at") or ""), s, hit[1]))
+        elif not (isinstance(marks.get(s["id"]), dict) and marks[s["id"]].get("state") == "skip") \
+                and all(done_by(r) for r in s.get("requires") or []):
+            nxt.append(s)
+    done.sort(key=lambda d: d[0])
+    return [(s, src) for _, s, src in done[-2:]], nxt[:2]
+
+
+def onboarding_block(rec: dict) -> str:
+    """Блок онбординга под строкой «За клавиатурой». Нет `onboarding` в кэше, каталога или этапов
+    к показу, любой сбой — пусто: карта приходит и без блока."""
+    try:
+        ob = rec.get("onboarding")
+        stages = load_stages() if isinstance(ob, dict) else None
+        if not stages:
+            return ""
+        done, nxt = onboarding_near(stages, ob, rec.get("role", ""))
+        if not done and not nxt:
+            return ""
+        marks = ob.get("marks") if isinstance(ob.get("marks"), dict) else {}
+
+        def title(s: dict) -> str:
+            return f"«{clean_name(s.get('title')) or s['id']}»"
+
+        def todo(s: dict) -> str:
+            m = marks.get(s["id"]) if isinstance(marks.get(s["id"]), dict) else {}
+            note = STATE_NOTES.get(m.get("state"), "")
+            if note and m.get("state") == "waiting" and clean_name(m.get("actor")):
+                note += ": " + clean_name(m.get("actor"))
+            return title(s) + (f" ({note})" if note else "")
+
+        lines = ["\n\n**Онбординг пользователя:**"]
+        if done:
+            lines.append("- пройдено: " + ", ".join(
+                title(s) + (f" (зачтён по `{src}`)" if src != s["id"] else "") for s, src in done))
+        if nxt:
+            lines.append("- дальше: " + "; ".join(todo(s) for s in nxt))
+        lines.append("- весь путь — скилл `space-onboarding`")
+        return "\n".join(lines)
+    except Exception:  # noqa: BLE001 — блок онбординга не имеет права уронить карту
+        return ""
 
 
 def personalize(base: Path, who: dict, units_override: list[str] | None = None) -> tuple[str, dict]:
@@ -822,14 +957,15 @@ def personalize(base: Path, who: dict, units_override: list[str] | None = None) 
     units = [u for u in units if u in units_all]
     rec = {"subject": who["subject"], "name": who.get("name", ""), "preferences": who.get("preferences", ""),
            "tenant": who.get("tenant", ""), "role": who.get("role", ""),
-           "profile_path": who.get("profile_path", ""), "units": units}
+           "profile_path": who.get("profile_path", ""), "units": units, "onboarding": who.get("onboarding")}
     email = account_email()
     cp = write_cache(email, base, rec)
     remembered = (f"запомнен на этой машине на {CACHE_TTL_HOURS} ч" if cp
                   else "аккаунт Claude на машине не определён — кэша нет, в следующей сессии снова `whoami`")
     lines = [f"{who_line(who['subject'], who.get('name', ''))}, профиль "
              f"`{who.get('profile_path') or '—'}` — персональная подкарта зоны; {remembered}."
-             f"{keyboard_line(who.get('name', ''))}{preferences_line(who.get('preferences', ''))}"]
+             f"{keyboard_line(who.get('name', ''))}{onboarding_block(rec)}"
+             f"{preferences_line(who.get('preferences', ''))}"]
     if units:
         lines.append(f"\n**Management units зоны** ({source}): " + " · ".join(f"`{u}/`" for u in units))
         for u in units:

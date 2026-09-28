@@ -30,6 +30,16 @@
         ]
       },
       {
+        "matcher": "mcp__.*__update_me",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-update-me",
+            "timeout": 15
+          }
+        ]
+      },
+      {
         "matcher": "Read|Glob|Grep|Bash|mcp__workspace__bash",
         "hooks": [
           {

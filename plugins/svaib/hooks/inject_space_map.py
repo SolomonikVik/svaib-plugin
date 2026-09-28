@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Карта пространства в контекст сессии. Один скрипт, четыре события:
+Карта пространства в контекст сессии. Один скрипт, пять событий:
 
     inject_space_map.py first-prompt   # UserPromptSubmit: только на ПЕРВОМ промпте сессии
     inject_space_map.py post-whoami    # PostToolUse (matcher mcp__.*__whoami): персонализация
+    inject_space_map.py post-update-me # PostToolUse (matcher mcp__.*__update_me): онбординг и настройки в кэш, без вывода
     inject_space_map.py node-enter     # PostToolUse (matcher Read|Glob|Grep|Bash): подкарта узла при входе
     inject_space_map.py compact        # SessionStart matcher=compact|clear: вернуть карту
     inject_space_map.py plain          # голый markdown в stdout (отладка; без маркера сессии)
@@ -19,6 +20,10 @@ SessionStart нет. SessionStart остаётся для `compact`/`clear` — 
 email аккаунта Claude + корень пространства; TTL 24 ч). Следующая сессия стартует
 персональной картой без MCP. Кэш протух / другой аккаунт / другая база → общая карта +
 короткая просьба вызвать `whoami`. Без MCP агент исходит из сведений об аккаунте.
+
+Под строкой «За клавиатурой» — ближайшие этапы онбординга («два и два»): статус `onboarding`
+из кэша × каталог этапов скилла `space-onboarding` (`space_map.onboarding_block`). Ответ
+`update_me` несёт итоговые статус и `preferences` — хук кладёт их в кэш, не продлевая срок записи.
 
 Подкарта узла — при входе в узел. Узел — папка
 верхнего уровня безусловно (кроме служебных, `_inbox`, `zz_archive`) **и** любая папка глубже
@@ -473,12 +478,12 @@ def map_context(gen, root: str, when: str, ask: bool) -> tuple[str, dict]:
         zone = " · ".join(f"`{u}/`" for u in units) or "management units не выведены"
         head = (f"## Карта пространства {when}\n\n"
                 f"{gen.who_line(cache['subject'], cache.get('name', ''))}, профиль "
-                f"`{cache.get('profile_path') or '—'}`, зона {zone} — запомнен на этой машине по прошлому `whoami`."
-                f"{gen.keyboard_line(cache.get('name', ''))}"
-                f"{gen.preferences_line(cache.get('preferences', ''))}")
-        if not units:
+                f"`{cache.get('profile_path') or '—'}`, зона {zone} — запомнен на этой машине по прошлому `whoami`.")
+        if not units:   # до блоков ниже: иначе фраза приклеивается к хвосту последнего из них
             head += (" Management units зоны не выведены — работай по общей карте: подкарта узла придёт "
                      "при первом обращении к его файлам.")
+        head += (f"{gen.keyboard_line(cache.get('name', ''))}{gen.onboarding_block(cache)}"
+                 f"{gen.preferences_line(cache.get('preferences', ''))}")
     else:
         head = (f"## Карта пространства {when}\n\n"
                 f"`map_profile: general` — карта общая, пользователь не установлен.")
@@ -493,10 +498,7 @@ def map_context(gen, root: str, when: str, ask: bool) -> tuple[str, dict]:
 
 def personalize_context(gen, root: str, hook_input: dict) -> tuple[str, dict]:
     from pathlib import Path
-    resp = hook_input.get("tool_response")
-    if isinstance(resp, dict) and "content" in resp and "structuredContent" not in resp:
-        resp = resp["content"]
-    who = gen.parse_whoami(resp)
+    who = gen.parse_whoami(hook_input.get("tool_response"))
     text, rec = gen.personalize(Path(root), who)
     return "## Персонализация карты (после `whoami`)\n\n" + text, {"profile": who["subject"], "units": rec["units"]}
 
@@ -518,8 +520,9 @@ EVENT = {"first-prompt": "UserPromptSubmit", "post-whoami": "PostToolUse", "node
          "compact": "SessionStart"}
 
 
-MODES = ("first-prompt", "post-whoami", "node-enter", "compact", "plain")
+MODES = ("first-prompt", "post-whoami", "post-update-me", "node-enter", "compact", "plain")
 WHOAMI_RE = re.compile(r"^mcp__.+__whoami$")
+UPDATE_ME_RE = re.compile(r"^mcp__.+__update_me$")
 
 
 def run(mode: str, hook_input: dict) -> None:
@@ -539,6 +542,8 @@ def run(mode: str, hook_input: dict) -> None:
         # Codex: отдельной регистрации на whoami у него нет, вызов приходит сюда —
         # персонализация та же, что у Claude по matcher `mcp__.*__whoami`
         mode = "post-whoami"
+    if mode == "node-enter" and UPDATE_ME_RE.match(hook_input.get("tool_name") or ""):
+        mode = "post-update-me"   # то же для update_me
     root = resolve_root(hook_input)
     if not root:
         if mode == "node-enter":
@@ -567,6 +572,11 @@ def run(mode: str, hook_input: dict) -> None:
     if gen is None:
         log("skip", mode=mode, reason="no generator", root=root)
         print("inject_space_map: генератор карты не найден — карта не подана", file=sys.stderr)
+        return
+    if mode == "post-update-me":
+        from pathlib import Path
+        ok = gen.apply_update_me(Path(root), hook_input.get("tool_response"))
+        log("ok" if ok else "skip", mode=mode, root=root, cache_updated=ok)
         return
     if mode == "post-whoami":
         context, meta = personalize_context(gen, root, hook_input)
@@ -599,13 +609,9 @@ def run(mode: str, hook_input: dict) -> None:
 
 def main():
     mode = sys.argv[1].lower() if len(sys.argv) > 1 else "first-prompt"
-    try:
+    try:   # чтение и разбор ввода — внутри той же границы: битый байт в stdin не роняет хук
         raw = sys.stdin.read()
-        hook_input = json.loads(raw) if raw.strip() else {}
-    except (json.JSONDecodeError, OSError):
-        hook_input = {}
-    try:
-        run(mode, hook_input)
+        run(mode, json.loads(raw) if raw.strip() else {})
     except Exception as e:  # noqa: BLE001 — хук не имеет права уронить сессию
         log("error", mode=mode, error=f"{type(e).__name__}: {e}")
         print(f"inject_space_map: {type(e).__name__}: {e}", file=sys.stderr)
