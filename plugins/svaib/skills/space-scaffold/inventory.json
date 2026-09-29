@@ -1,6 +1,6 @@
 {
   "plugin": "svaib",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "skills": [
     "content-update",
     "metrics-values",
@@ -53,6 +53,10 @@
       "events": []
     },
     {
+      "script": "usage_codex.py",
+      "events": []
+    },
+    {
       "script": "usage_log.py",
       "events": [
         "PreToolUse",
@@ -75,6 +79,7 @@
       "meeting-analysis-beta": "rhythm-meeting-debrief",
       "meeting-protocol": "rhythm-meeting-debrief",
       "meeting-analysis-old": null,
+      "rhythm-meeting-debrief-old": null,
       "metrics-analysis": "metrics-values",
       "scaffold": "space-scaffold",
       "scaffold-align": "space-align",

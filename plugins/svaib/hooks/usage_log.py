@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Учёт использования скиллов плагина: строка в `<пространство>/.svaib/usage/<хост>.md` на вызов.
+Учёт использования скиллов Claude Code и Codex: строка в `<пространство>/.svaib/usage/<хост>.md` на вызов.
 
     usage_log.py skill    # PreToolUse matcher Skill — скилл вызвала модель
-    usage_log.py prompt   # UserPromptSubmit — `/плагин:скилл` от пользователя; закрывает прошлые вызовы
+    usage_log.py prompt   # UserPromptSubmit — `/плагин:скилл` Claude, `$скилл` Codex; закрывает прошлые вызовы
     usage_log.py stop     # Stop — ход закончен, вызовы хода помечаются завершёнными
     usage_log.py end      # SessionEnd — закрывает всё открытое
 
@@ -18,6 +18,8 @@
 Состояние открытых вызовов — вне пространства, файл на сессию. Сбой — stderr и код 0.
 `кто` — `subject` из кэша идентичности хука карты (`space_map.read_cache`, тот же ключ, срок не
 важен) на момент вызова скилла, хранится в состоянии вызова; нет записи — клетка пустая.
+В Codex `кто` пуст: этот кэш привязан к аккаунту Claude. Только явные команды;
+несколько команд одного хода получают строки без распределения общего расхода.
 """
 from __future__ import annotations
 
@@ -36,6 +38,11 @@ try:
     import usage_claude
 except ImportError:  # неполная поставка: main выходит с кодом 0
     hook_space = usage_claude = None
+
+try:
+    import usage_codex
+except ImportError:
+    usage_codex = None  # отсутствие нового адаптера не отключает учёт Claude
 
 try:
     import fcntl
@@ -154,7 +161,66 @@ def sweep_state(current: str) -> None:
 
 
 def plugin_root() -> str:
-    return os.environ.get("CLAUDE_PLUGIN_ROOT") or os.path.dirname(HOOK_DIR)
+    return os.environ.get("CLAUDE_PLUGIN_ROOT") or os.environ.get("PLUGIN_ROOT") or os.path.dirname(HOOK_DIR)
+
+
+def turn_key(ev: dict):
+    return ev.get("turn_id") or ev.get("prompt_id")
+
+
+def open_codex_runs(ev: dict) -> None:
+    """Только явные $команды скиллов этого пакета. Чтение SKILL.md вызовом не считаем."""
+    if usage_codex is None or ev.get("agent_id") or not isinstance(ev.get("turn_id"), str):
+        return
+    sid = ev.get("session_id")
+    if not isinstance(sid, str) or not sid:
+        return
+    root = hook_space.ready_usage_root(ev, use_claude_env=False)
+    if not root:
+        return  # до чтения rollout и создания состояния
+    try:
+        with open(os.path.join(plugin_root(), ".claude-plugin", "plugin.json"), encoding="utf-8") as f:
+            own = json.load(f).get("name")
+    except (OSError, ValueError, AttributeError):
+        return
+    selected = {}
+    for name in re.findall(r"(?<![\w\\$])\$([A-Za-z0-9][\w.-]*(?::[\w.-]+)?)(?![\w:.-])", ev.get("prompt") or ""):
+        qualified = name if ":" in name else f"{own}:{name}"
+        skill = plugin_skill(qualified)
+        if not skill and qualified.endswith("."):
+            skill = plugin_skill(qualified.rstrip("."))  # пунктуация после команды; точное имя имеет приоритет
+        if skill:
+            selected[skill[0]] = skill[1]
+    if not selected:
+        return
+    entries = usage_codex.read(ev.get("transcript_path"))
+    meta = usage_codex.session_meta(entries)
+    if isinstance(meta.get("source"), dict) and "subagent" in meta["source"]:
+        return
+    # Якорь Codex — исходный cwd сессии в rollout. Смена cwd не переносит учёт в другую базу.
+    original = meta.get("cwd")
+    anchored = hook_space.ready_usage_root({"cwd": original}, use_claude_env=False) if isinstance(original, str) else None
+    if not anchored or os.path.realpath(anchored) != os.path.realpath(root):
+        return
+    # Кэш карты привязан к аккаунту Claude, не Codex: чужую идентичность не переносим.
+    subject = ""
+    with runs_of(sid) as runs:
+        for name, path in selected.items():
+            key = f"codex:{ev['turn_id']}:{name}"
+            if any(r.get("key") == key for r in runs):
+                continue
+            runs.append({"key": key, "session": sid, "skill": name, "plugin": own,
+                         "skill_path": path, "version": skill_version(path),
+                         "root": root, "root_real": os.path.realpath(root), "prompt_id": ev['turn_id'],
+                         "start": time.time(), "transcript": ev.get("transcript_path"),
+                         "harness": "codex", "model": ev.get("model"), "who": subject,
+                         "shared_turn": False})
+            log("open", skill=name, session=sid)
+        peers = [r for r in runs if r.get("harness") == "codex" and r.get("prompt_id") == ev["turn_id"]]
+        if len(peers) > 1:
+            for r in peers:
+                r["shared_turn"] = True  # команды могут прийти разными событиями одного хода
+    sweep_state(sid)
 
 
 def plugin_skill(name) -> tuple[str, str] | None:
@@ -253,8 +319,9 @@ def row(run: dict, m: dict, session_id: str) -> str:
     start = datetime.datetime.fromtimestamp(run["start"]).astimezone()
     stamp = start.strftime("%Y-%m-%d %H:%M%z")
     end = (m["last"] if m["cut"] else run.get("stopped_at") or m["last"]) or run["start"]
-    harness = "cowork" if run.get("cowork") else ("claude-code " + (m["version"] or "")).strip()
-    outcome = "ошибка" if m["error"] else ("завершён" if run.get("stopped_at") else "оборван")
+    harness = "cowork" if run.get("cowork") else ((run.get("harness") or "claude-code") + " " + (m["version"] or "")).strip()
+    done = m.get("completed", bool(run.get("stopped_at")))
+    outcome = "ошибка" if m["error"] else ("завершён" if done else "оборван")
     cells = [stamp[:-2] + ":" + stamp[-2:], run["skill"], run.get("version"), "", harness, " + ".join(m["models"]),
              os_name(), host(), run.get("who"), "", m["input"], m["output"], m["cache_read"], m["cache_write"],
              m["turns"], m["tools"], m["agents"], m["agent_tokens"], max(0, round(end - run["start"])), outcome,
@@ -289,20 +356,28 @@ def close_runs(ev: dict, keep_prompt: str | None = None) -> None:
         return  # быстрый выход: открытых вызовов нет, транскрипт не читаем
     with runs_of(sid) as runs:
         closing = [r for r in runs if keep_prompt is None or r.get("prompt_id") != keep_prompt]
+        for run in list(closing):
+            if not usage_root_ready(run):
+                closing.remove(run)
+                runs.remove(run)
+                log("space changed", skill=run["skill"], session=sid)
         if not closing:
-            return
+            return  # учёт выключен или корень изменён: rollout не читаем
         transcript = ev.get("transcript_path") or closing[-1].get("transcript") or ""
-        entries = usage_claude.read(transcript)
+        adapter = usage_codex if closing[-1].get("harness") == "codex" else usage_claude
+        if adapter is None:
+            return  # неполная поставка: состояние дождётся исправленного адаптера
+        entries = adapter.read(transcript)
         # ждём последний ответ только хода, который кончился сейчас: сверка один раз на вызов;
         # на SessionEnd не ждём — хост даёт ему короткий тайм-аут, а транскрипт к нему дописан
         final = next((r["final"] for r in reversed(closing) if r.get("final")), None) if keep_prompt else None
         for r in closing:
             r["final"] = None
         deadline = time.time() + FLUSH_WAIT
-        while final and not usage_claude.has_final_text(entries, final) and time.time() < deadline:
+        while final and not adapter.has_final_text(entries, final) and time.time() < deadline:
             time.sleep(0.1)
-            entries = usage_claude.read(transcript)
-        if isinstance(ev.get("prompt"), str):  # запрос этого события хост пишет в транскрипт позже хука
+            entries = adapter.read(transcript)
+        if adapter is usage_claude and isinstance(ev.get("prompt"), str):  # запрос этого события хост пишет в транскрипт позже хука
             entries.append({"type": "user", "promptId": ev.get("prompt_id"), "message": {"content": ev["prompt"]}})
         begun = time.time()
         for run in closing:
@@ -322,16 +397,21 @@ def close_runs(ev: dict, keep_prompt: str | None = None) -> None:
             log(outcome, skill=run["skill"], session=sid)
 
 
+def usage_root_ready(run: dict) -> bool:
+    return os.path.isfile(os.path.join(run["root"], ".svaib", "usage", "README.md")) and \
+        os.path.realpath(run["root"]) == run.get("root_real", os.path.realpath(run["root"]))
+
+
 def close_one(run: dict, entries: list[dict], transcript: str, sid: str, final_close: bool) -> str:
-    m = usage_claude.measure(entries, run, transcript)
+    adapter = usage_codex if run.get("harness") == "codex" else usage_claude
+    m = adapter.measure(entries, run, transcript)
     if m is None:
         return "start not in transcript"
     if m.get("denied"):
         return "denied"
     if m["pending"] and not final_close and time.time() - run["start"] < PENDING_TTL:
         return "pending"  # фоновый субагент ещё без итога — строка подождёт следующего события
-    ready = os.path.isfile(os.path.join(run["root"], ".svaib", "usage", "README.md"))
-    if not ready or os.path.realpath(run["root"]) != run.get("root_real", os.path.realpath(run["root"])):
+    if not usage_root_ready(run):
         return "space changed"  # путь теперь ведёт в другую базу или учёт выключен — не пишем
     return "write" if append(run["root"], row(run, m, sid)) else "header mismatch"
 
@@ -342,7 +422,7 @@ def mark_stopped(ev: dict) -> None:
         return
     with runs_of(sid) as runs:
         for run in runs:
-            if run.get("prompt_id") == ev.get("prompt_id"):
+            if run.get("prompt_id") == turn_key(ev):
                 run["stopped_at"] = time.time()  # повторный Stop того же хода сдвигает конец
                 run["final"] = usage_claude.digest(ev.get("last_assistant_message") or "") \
                     if (ev.get("last_assistant_message") or "").strip() else None
@@ -353,7 +433,10 @@ def run(mode: str, ev: dict) -> None:
         ti = ev.get("tool_input") or {}
         open_run(ev, ti.get("skill"), "tool:" + str(ev.get("tool_use_id")), ev.get("tool_use_id"))
     elif mode == "prompt":
-        close_runs(ev, keep_prompt=ev.get("prompt_id"))
+        close_runs(ev, keep_prompt=turn_key(ev))
+        if ev.get("turn_id"):
+            open_codex_runs(ev)
+            return
         m = SLASH_RE.match(ev.get("prompt") or "")
         if m:
             open_run(ev, m.group(1), "prompt:" + str(ev.get("prompt_id")))

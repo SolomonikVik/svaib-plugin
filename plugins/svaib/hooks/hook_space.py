@@ -86,15 +86,17 @@ def _cowork() -> bool:
     return os.environ.get("CLAUDE_CODE_IS_COWORK") == "1" and bool((os.environ.get("CLAUDE_CODE_WORKSPACE_HOST_PATHS") or "").strip())
 
 
-def resolve_root(hook_input: dict, on_ambiguous: Callable[[int, int, list[str]], None] | None = None) -> str | None:
+def resolve_root(hook_input: dict, on_ambiguous: Callable[[int, int, list[str]], None] | None = None,
+                 *, use_claude_env: bool = True) -> str | None:
     """Корень сессии. Cowork с подключёнными папками — их ответ окончательный, отказ тоже:
     служебные CLAUDE_PROJECT_DIR и cwd привели бы к чужому маркеру. Иначе CLAUDE_PROJECT_DIR
-    с маркером — корень, даже если выше есть другой; иначе верхний маркер от cwd."""
+    с маркером — корень, даже если выше есть другой; иначе верхний маркер от cwd.
+    Codex передаёт use_claude_env=False: окружение Claude не определяет его пространство."""
     if not isinstance(hook_input, dict):
         return None
-    if _cowork():
+    if use_claude_env and _cowork():
         return workspace_root(on_ambiguous)
-    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    project = os.environ.get("CLAUDE_PROJECT_DIR") if use_claude_env else None
     if project and os.path.isdir(project) and has_root_marker(project):
         return os.path.abspath(project)
     start = hook_input.get("cwd") or os.getcwd()
@@ -113,17 +115,17 @@ def _foreign(path: str, real_root: str) -> bool:
     return False
 
 
-def ready_usage_root(hook_input: dict) -> str | None:
+def ready_usage_root(hook_input: dict, *, use_claude_env: bool = True) -> str | None:
     """База для строки учёта: корень сессии с `.svaib/usage/README.md`. Молчит, если действие
     могло уйти в другую базу: между cwd (в Cowork — любой подключённой папкой) и корнем лежит
     другая `.svaib/` или свой CLAUDE.md/AGENTS.md — вложенная база, копия клиента, отдельный
     проект, другая база вне корня. Так Claude и Codex в одной папке пишут одинаково."""
     try:
-        root = resolve_root(hook_input)
+        root = resolve_root(hook_input, use_claude_env=use_claude_env)
         if not root or not os.path.isfile(os.path.join(root, ".svaib", "usage", "README.md")):
             return None
         real_root = os.path.realpath(root)
-        if _cowork():  # cwd у Cowork — служебная папка сессии, судят подключённые папки
+        if use_claude_env and _cowork():  # cwd у Cowork — служебная папка сессии, судят подключённые папки
             paths = _workspace_folders()
         else:
             cwd = hook_input.get("cwd")
