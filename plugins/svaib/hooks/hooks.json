@@ -7,12 +7,13 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" first-prompt",
             "timeout": 15,
-            "statusMessage": "Подаю карту пространства (первый запрос сессии)"
+            "statusMessage": "Карта пространства — в начале разговора"
           },
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" prompt",
-            "timeout": 10
+            "timeout": 10,
+            "statusMessage": "Учёт работы скиллов — новый запрос"
           }
         ]
       }
@@ -25,7 +26,7 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-whoami",
             "timeout": 15,
-            "statusMessage": "Подкарта зоны пользователя"
+            "statusMessage": "Карта вашей зоны — после входа в svaib"
           }
         ]
       },
@@ -35,7 +36,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-update-me",
-            "timeout": 15
+            "timeout": 15,
+            "statusMessage": "Ваши настройки и путь освоения — после изменения"
           }
         ]
       },
@@ -46,7 +48,7 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" node-enter",
             "timeout": 15,
-            "statusMessage": "Подкарта узла при первом обращении"
+            "statusMessage": "Карта папки — при первом обращении к ней"
           }
         ]
       }
@@ -59,13 +61,13 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" compact",
             "timeout": 15,
-            "statusMessage": "Возвращаю карту после сжатия"
+            "statusMessage": "Карта пространства — после сжатия разговора"
           },
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_file_spec.py\" compact",
             "timeout": 10,
-            "statusMessage": "Снимаю метки спецификаций после сжатия"
+            "statusMessage": "Требования к файлам — после сжатия разговора (Claude Code)"
           }
         ]
       }
@@ -76,12 +78,14 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/check_deferred_actions.py\"",
-            "timeout": 15
+            "timeout": 15,
+            "statusMessage": "Проверка обещаний «сделаю потом» — конец ответа"
           },
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" stop",
-            "timeout": 10
+            "timeout": 10,
+            "statusMessage": "Учёт работы скиллов — конец ответа"
           }
         ]
       }
@@ -94,17 +98,18 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_file_spec.py\" pre-write",
             "timeout": 10,
-            "statusMessage": "Спецификация файла до записи"
+            "statusMessage": "Требования к файлу — перед первой записью"
           }
         ]
       },
       {
-        "matcher": "Skill",
+        "matcher": "Skill|Agent|Task",
         "hooks": [
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" skill",
-            "timeout": 10
+            "timeout": 10,
+            "statusMessage": "Учёт работы скиллов — запуск скилла или субагента"
           }
         ]
       }
@@ -116,7 +121,7 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_file_spec.py\" compact",
             "timeout": 10,
-            "statusMessage": "Снимаю метки спецификаций после сжатия"
+            "statusMessage": "Требования к файлам — после сжатия разговора (Codex)"
           }
         ]
       }
@@ -127,7 +132,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" end",
-            "timeout": 10
+            "timeout": 10,
+            "statusMessage": "Учёт работы скиллов — конец сессии"
           }
         ]
       }

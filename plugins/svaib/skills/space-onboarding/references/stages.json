@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "catalog": 1,
+ "catalog": 2,
  "stages": [
   {
    "id": "user.connect",
@@ -66,10 +66,23 @@
    "active": true
   },
   {
-   "id": "user.first-work",
+   "id": "user.preferences",
    "track": "user",
    "kind": "base",
    "order": 60,
+   "title": "Мои настройки",
+   "audiences": [],
+   "requires": [
+    "user.first-talk"
+   ],
+   "replaces": [],
+   "active": true
+  },
+  {
+   "id": "user.first-work",
+   "track": "user",
+   "kind": "base",
+   "order": 70,
    "title": "Первая работа",
    "audiences": [],
    "requires": [
@@ -82,7 +95,7 @@
    "id": "user.keep-context",
    "track": "user",
    "kind": "base",
-   "order": 70,
+   "order": 80,
    "title": "Обновляю память",
    "audiences": [],
    "requires": [
@@ -95,7 +108,7 @@
    "id": "tool.meeting-record",
    "track": "user",
    "kind": "tool",
-   "order": 80,
+   "order": 90,
    "title": "Запись и транскрибация встреч",
    "audiences": [],
    "requires": [
@@ -108,7 +121,7 @@
    "id": "tool.meeting-debrief",
    "track": "user",
    "kind": "tool",
-   "order": 90,
+   "order": 100,
    "title": "Разбор встречи",
    "audiences": [],
    "requires": [
@@ -121,7 +134,7 @@
    "id": "tool.agenda",
    "track": "user",
    "kind": "tool",
-   "order": 100,
+   "order": 110,
    "title": "Повестка",
    "audiences": [],
    "requires": [
@@ -134,7 +147,7 @@
    "id": "tool.metrics",
    "track": "user",
    "kind": "tool",
-   "order": 110,
+   "order": 120,
    "title": "Метрики",
    "audiences": [],
    "requires": [
@@ -147,7 +160,7 @@
    "id": "tool.calendar",
    "track": "user",
    "kind": "tool",
-   "order": 120,
+   "order": 130,
    "title": "Календарь",
    "audiences": [],
    "requires": [
@@ -160,7 +173,7 @@
    "id": "tool.email",
    "track": "user",
    "kind": "tool",
-   "order": 130,
+   "order": 140,
    "title": "Почта",
    "audiences": [],
    "requires": [
@@ -173,7 +186,7 @@
    "id": "tool.telegram",
    "track": "user",
    "kind": "tool",
-   "order": 140,
+   "order": 150,
    "title": "Telegram",
    "audiences": [],
    "requires": [
@@ -290,7 +303,12 @@
    "catalog": 1,
    "date": "2026-09-26",
    "text": "Первый каталог"
+  },
+  {
+   "catalog": 2,
+   "date": "2026-09-30",
+   "text": "Добавлен этап «Мои настройки»"
   }
  ],
- "content_sha": "7c4f552010e4008e2fa9044bf480275670d317a83266b210d6b4437fb139fe88"
+ "content_sha": "20a9d340896615741d001c2a6f44d25b824f0a8f9c792f6a7d153f6fb309fccd"
 }
