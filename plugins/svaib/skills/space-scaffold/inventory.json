@@ -1,17 +1,25 @@
 {
   "plugin": "svaib",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "skills": [
     "content-update",
+    "metrics-intake",
     "metrics-values",
+    "projects-review",
     "rhythm-meeting-agenda",
     "rhythm-meeting-debrief",
+    "roles-metrics",
+    "roles-projects",
+    "roles-rhythm",
     "roles-strategy",
+    "roles-team",
     "send-telegram",
     "space-align",
     "space-onboarding",
     "space-scaffold",
     "space-toolbox",
+    "team-person-review",
+    "team-unit-review",
     "transcript-extract"
   ],
   "agents": [
@@ -84,7 +92,10 @@
       "scaffold": "space-scaffold",
       "scaffold-align": "space-align",
       "toolbox": "space-toolbox",
-      "email-assistant": null
+      "email-assistant": null,
+      "rhythm-project-review": "projects-review",
+      "rhythm-unit-review": "team-unit-review",
+      "rhythm-person-review": "team-person-review"
     }
   }
 }

@@ -132,7 +132,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" end",
-            "timeout": 10,
+            "timeout": 3,
             "statusMessage": "Учёт работы скиллов — конец сессии"
           }
         ]
