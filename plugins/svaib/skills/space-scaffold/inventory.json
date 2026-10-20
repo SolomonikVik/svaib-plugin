@@ -1,10 +1,11 @@
 {
   "plugin": "svaib",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "skills": [
     "content-update",
     "metrics-intake",
     "metrics-values",
+    "onboarding",
     "projects-review",
     "rhythm-meeting-agenda",
     "rhythm-meeting-debrief",
@@ -15,7 +16,6 @@
     "roles-team",
     "send-telegram",
     "space-align",
-    "space-onboarding",
     "space-scaffold",
     "space-toolbox",
     "team-person-review",
@@ -95,7 +95,8 @@
       "email-assistant": null,
       "rhythm-project-review": "projects-review",
       "rhythm-unit-review": "team-unit-review",
-      "rhythm-person-review": "team-person-review"
+      "rhythm-person-review": "team-person-review",
+      "space-onboarding": "onboarding"
     }
   }
 }

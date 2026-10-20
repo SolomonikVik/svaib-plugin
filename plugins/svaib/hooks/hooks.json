@@ -42,7 +42,7 @@
         ]
       },
       {
-        "matcher": "Read|Glob|Grep|Bash|mcp__workspace__bash",
+        "matcher": "Read|Glob|Grep|Bash|PowerShell|mcp__workspace__bash",
         "hooks": [
           {
             "type": "command",
@@ -92,7 +92,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|apply_patch|Bash|exec_command|shell|local_shell|unified_exec|mcp__workspace__bash",
+        "matcher": "Write|Edit|MultiEdit|apply_patch|Bash|PowerShell|exec_command|shell|local_shell|unified_exec|mcp__workspace__bash",
         "hooks": [
           {
             "type": "command",
