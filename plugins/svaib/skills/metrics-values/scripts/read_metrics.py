@@ -11,14 +11,14 @@
 Масштаб по умолчанию 1; иной масштаб агент переносит из «Числа в книге».
 labels — адрес для одного прогона, отдельного поля пути меток в паспорте нет.
 
-strict_labels: true требует точный лист и дословные метки без нормализации и поиска подстрокой.
+Лист и метки всегда сопоставляются дословно, без нормализации и поиска подстрокой.
 plan_source в записи метрики задаёт собственные book (локальный xlsx, необязательно),
 sheet, labels, unit, scale и year плана. Его ряд присоединяется к plan этой метрики.
-Путь book разрешается от каталога запуска, как --book; Google-книгу заранее выгружают.
+Путь book разрешается от каталога запуска, как --book; скрипт читает существующий локальный XLSX.
 
-В строгом режиме сдвиг строки допустим, изменение имени листа или метки — отказ без числа.
+Сдвиг строки допустим, изменение имени листа или метки — отказ без числа.
 При нескольких кандидатах или непонятной оси периодов число также не выдаётся.
-Совместимость старых карт: без strict_labels допускаются похожие листы и метки с пометкой.
+Параметр strict_labels старых карт больше не ослабляет проверку.
 """
 from __future__ import annotations
 
@@ -38,24 +38,14 @@ MONTHS = {'jan':1,'january':1,'янв':1,'январь':1,'feb':2,'february':2,'
           'dec':12,'december':12,'дек':12,'декабрь':12}
 
 
-# Единицы, где ошибка в тысячу раз не видна глазом: «901» и «901 000» одинаково
-# правдоподобны. Формат ячейки о масштабе молчит, поэтому для таких метрик карта
-# обязана объявить `scale` — хоть 1, если числа в книге сырые.
-MONEY_HINTS = ("aed", "usd", "eur", "gbp", "руб", "₽", "$", "€", "£", "тыс", "млн",
-               "money", "amount", "выручк", "маржа", "прибыл", "расход")
-
-
-def needs_scale(unit):
-    u = norm(unit)
-    if not u:
-        return False
-    if u in ("%", "percent", "процент", "шт", "штук", "pcs", "клиенты", "человек", "дней", "days"):
-        return False
-    return any(h in u for h in MONEY_HINTS)
-
-
 def norm(s):
     return '' if s is None else re.sub(r'\s+', ' ', str(s)).strip().lower()
+
+
+def is_percent_format(fmt):
+    """Знак процента в числовом формате; проценты в строках/экранировании — литералы."""
+    numeric = re.sub(r'"(?:[^"]|"")*"|\\.|_.|\*.', '', str(fmt))
+    return '%' in numeric
 
 
 # Шапка периодов бывает и машинной: «2026-09» (ISO), «2026/09», «09.2026» —
@@ -67,19 +57,17 @@ ISO_MONTH = re.compile(r'^(?:(\d{4})[-/.](\d{1,2})|(\d{1,2})[./](\d{4}))$')
 
 
 def parse_month(v):
-    k = norm(v).replace('.', '')
+    k = norm(v)
     if not k:
         return None
     iso = ISO_MONTH.match(norm(v))
     if iso:
         month = int(iso.group(2) or iso.group(3))
         return month if 1 <= month <= 12 else None
-    if k in MONTHS:
-        return MONTHS[k]
-    for name, m in sorted(MONTHS.items(), key=lambda x: -len(x[0])):
-        if k.startswith(name):
-            return m
-    return None
+    # Разбираем целую подпись месяца, а не начало слова: «маржа» не «март»,
+    # «Jan plan» не факт за январь, «Jan-25» не январь неизвестного года.
+    named = re.fullmatch(r'([a-zа-яё]+)\.?(?:\s+(?:19|20)\d{2})?', k)
+    return MONTHS.get(named.group(1)) if named else None
 
 
 def sheet_grid(ws):
@@ -94,57 +82,87 @@ def sheet_grid(ws):
     return grid
 
 
+def read_numeric_cell(ws, formula_wb, sheet, coordinate, item, percent=None):
+    """Read a stored numeric result; keep absence and errors explicit."""
+    cell = ws[coordinate]
+    formula_cell = (formula_wb[sheet][coordinate]
+                    if formula_wb is not None else cell)
+    value = cell.value
+    if cell.data_type == "e" or (isinstance(value, str) and value.startswith("#")):
+        return None, f"ошибка в ячейке источника ({value})"
+    if value is None:
+        reason = ("формула не имеет сохранённого результата"
+                  if formula_cell.data_type == "f" else "ячейка пуста")
+        return None, reason
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None, "ячейка содержит нечисловое значение"
+    is_percentage = is_percent_format(cell.number_format) if percent is None else percent
+    if is_percentage:
+        return round(value * 100, 2), None
+    return value * (item.get("scale") or 1), None
+
+
 def find_period_axis(grid, max_scan=10):
-    """Шапка периодов: строка с наибольшим числом распознанных месяцев (минимум три)."""
-    best = None
+    """Единственная шапка с минимум тремя месяцами; неоднозначную не выбираем."""
+    axes = []
     for r in range(min(max_scan, len(grid))):
         cols = {}
         for c, v in enumerate(grid[r]):
             m = parse_month(v)
             if m and m not in cols:
                 cols[m] = c
-        if len(cols) >= 3 and (best is None or len(cols) > len(best[1])):
-            best = (r, cols)
+        if len(cols) >= 3:
+            axes.append((r, cols))
+    if len(axes) > 1:
+        raise ValueError("несколько осей периодов: нужен проверенный читатель этой раскладки")
+    best = axes[0] if axes else None
+    if best:
+        r, cols = best
+        # Не выбираем первую колонку месяца: это может быть план или другой год.
+        roles = {"план", "факт", "plan", "fact", "actual", "actuals", "budget", "%", "отклонение"}
+        if any(norm(value) in roles for header in grid[:r] + grid[r + 1:r + 3]
+               for value in header[min(cols.values()):max(cols.values()) + 1]):
+            raise ValueError("роль колонки план/факт не определена: нужен проверенный читатель этой раскладки")
+        months = [parse_month(value) for value in grid[r] if parse_month(value)]
+        if len(months) != len(set(months)):
+            raise ValueError("месяцы повторяются: годовой блок или роль колонки не определены")
     return best
 
 
-def _match(path, want, exact):
+def _match(path, want):
     i = 0
     for cell in path:
-        if i < len(want) and want[i] and (cell == want[i] if exact else want[i] in cell):
+        if i < len(want) and want[i] and cell == want[i]:
             i += 1
     return i == len(want)
 
 
-def find_rows(grid, labels, first_value_col, strict=False):
-    """Строки по пути меток. Сначала точное совпадение; подстрока — только если точных ноль.
-
-    Подстрока на живых книгах ловит лишнее: «% churn rate» входит в «% churn rate partners»,
-    «fact» — в «fact (2025)». Поэтому неоднозначность не разрешается: отдаём всех кандидатов,
-    решение принимает вызывающий, а значение не выводится.
-    strict=True отключает подстроку и нормализацию регистра/пробелов.
-    """
-    normalize = (lambda value: '' if value is None else str(value)) if strict else norm
-    want = [normalize(x) for x in labels]
-    for exact in ((True,) if strict else (True, False)):
-        hits = [r for r in range(len(grid))
-                if _match([normalize(grid[r][c]) for c in range(first_value_col)], want, exact)]
-        if hits:
-            return hits, ('exact' if exact else 'substring')
-    return [], 'none'
+def literal(value):
+    return '' if value is None else str(value)
 
 
-def find_column(grid, label, max_scan=10):
+def find_rows(grid, labels, first_value_col, strict=True):
+    """Все строки с дословным путём меток; strict сохранён для старых вызовов."""
+    want = [literal(x) for x in labels]
+    hits = [r for r in range(len(grid))
+            if _match([literal(grid[r][c]) for c in range(first_value_col)], want)]
+    return hits, 'exact' if hits else 'none'
+
+
+def find_column(grid, label, max_scan=10, strict=True):
     """Колонка по заголовку («Month», «Total») — для листов без ряда по месяцам."""
-    want = norm(label)
+    want = literal(label)
+    hits = []
     for r in range(min(max_scan, len(grid))):
         for c, v in enumerate(grid[r]):
-            if norm(v) == want:
-                return r, c
-    return None, None
+            if literal(v) == want:
+                hits.append((r, c))
+    if len(hits) > 1:
+        raise ValueError(f"колонка «{label}» неоднозначна: {len(hits)} совпадений; нужен выбор блока")
+    return hits[0] if hits else (None, None)
 
 
-def read_by_column(grid, ws, item, strict=False):
+def read_by_column(grid, ws, item, strict=True, formula_wb=None):
     """Значение на пересечении строки-по-меткам и колонки-по-заголовку.
 
     Так адресуются оперативные листы: ряда по месяцам нет, есть колонка «Month» и
@@ -152,7 +170,10 @@ def read_by_column(grid, ws, item, strict=False):
     Координаты в карте не нужны — те же метки, что в описании метрики; строки съедут, а
     метки останутся.
     """
-    hrow, col = find_column(grid, item["column_label"])
+    try:
+        hrow, col = find_column(grid, item["column_label"], strict=strict)
+    except ValueError as exc:
+        return None, str(exc)
     if col is None:
         return None, f"колонка «{item['column_label']}» не найдена"
     hits, mode = find_rows(grid, item["labels"], col, strict=strict)
@@ -160,15 +181,14 @@ def read_by_column(grid, ws, item, strict=False):
         return None, ("меток не найдено" if not hits
                       else f"неоднозначно: {len(hits)} строк {[h + 1 for h in hits]}")
     r = hits[0]
-    v = grid[r][col]
-    if v is None or not isinstance(v, (int, float)):
-        return None, f"в строке {r + 1} нет числа"
-    fmt = ws.cell(r + 1, col + 1).number_format
-    val = round(v * 100, 2) if str(fmt).endswith('%') else v * (item.get("scale") or 1)
-    return (val, r + 1, mode), None
+    address = ws.cell(r + 1, col + 1).coordinate
+    value, err = read_numeric_cell(ws, formula_wb, ws.title, address, item)
+    if err:
+        return None, f"в строке {r + 1}: {err}"
+    return (value, r + 1, mode), None
 
 
-def read_cell(ws, grid, item, strict=False):
+def read_cell(ws, grid, item, strict=True, formula_wb=None):
     """Адрес одной ячейкой: значение текущего периода, которого нет в ряду по месяцам.
 
     Так адресуются оперативные показатели («прогноз месяца», «накопленным итогом»):
@@ -180,60 +200,52 @@ def read_cell(ws, grid, item, strict=False):
     if not guard.get("cell") or not guard.get("label"):
         return None, "адрес ячейкой без guard: нужна метка-подтверждение"
     got = ws[guard["cell"]].value
-    normalize = (lambda value: '' if value is None else str(value)) if strict else norm
-    if normalize(got) != normalize(guard["label"]):
+    if literal(got) != literal(guard["label"]):
         return None, (f"guard не сошёлся: {guard['cell']} = {got!r}, "
                       f"ожидалось {guard['label']!r} — строки съехали")
-    cell = ws[item["cell"]]
-    v = cell.value
-    if v is None or not isinstance(v, (int, float)):
-        return None, f"в {item['cell']} нет числа"
-    return (round(v * 100, 2) if str(cell.number_format).endswith('%')
-            else v * (item.get("scale") or 1)), None
+    return read_numeric_cell(ws, formula_wb, ws.title, item["cell"], item)
 
 
-def resolve_sheet(wb, name, strict=False):
-    """Лист по имени; переименовали — ищем единственный похожий и говорим об этом."""
+def resolve_sheet(wb, name, strict=True):
+    """Точное имя листа; strict сохранён для старых вызовов."""
     if name in wb.sheetnames:
         return name, None
-    if strict:
-        return None, f"лист «{name}» не найден"
-    cand = [s for s in wb.sheetnames if norm(name) in norm(s) or norm(s) in norm(name)]
-    if len(cand) == 1:
-        return cand[0], f"лист «{name}» не найден, читаю «{cand[0]}»"
-    return None, f"лист «{name}» не найден, похожих {len(cand)}"
+    return None, f"лист «{name}» не найден"
 
 
 def _read_impl(book, card, year=None, upto=None, kind="факт"):
     """upto — последний период, за который бывает ФАКТ (по умолчанию текущий месяц).
 
-    В книгах формулы считают и будущие месяцы: пустой сентябрь выдаёт 0, а рост
-    год-к-году — 43%. Такой факт не факт, а артефакт формулы, поэтому ряд факта
-    обрезается по upto. План на будущее остаётся: он и должен смотреть вперёд.
+    Читается сохранённый числовой результат ячейки; формулы не вычисляются заново.
+    Периоды после upto остаются вне факта. План на будущее сохраняется.
     """
     wb = openpyxl.load_workbook(book, data_only=True)
+    formulas = None
     try:
-        return _read_workbook(wb, card, year, upto, kind)
+        formulas = openpyxl.load_workbook(book, data_only=False)
+        return _read_workbook(wb, card, year, upto, kind, formula_wb=formulas)
     finally:
         wb.close()
+        if formulas is not None:
+            formulas.close()
 
 
-def _read_workbook(wb, card, year, upto, kind):
+def _read_workbook(wb, card, year, upto, kind, formula_wb=None):
     cache, out = {}, []
     for item in card["metrics"]:
-        strict = bool(item.get("strict_labels") or card.get("strict_labels"))
+        strict = True
         row = {"metric": item["name"], "unit": item.get("unit"), "notes": [], "values": {}, "plan": {},
                "companion": bool(item.get("year_offset"))}
-        if needs_scale(item.get("unit")) and item.get("scale") is None:
-            # Читаем как есть, но вслух: масштаб денежной метрики глазом не проверяется,
-            # «901» и «901 000» одинаково правдоподобны. Молчать здесь нельзя, запрещать —
-            # тоже: у метрики может не быть описания вовсе, а число всё равно нужно.
-            row["notes"].append(
-                f"единица не подтверждена: не сказано, в чём числа — тысячи или сырые "
-                f"«{item.get('unit')}». Числа отданы как в книге")
-            row["gap"] = {"what": "unit", "metric": item["name"],
-                          "unit": item.get("unit"), "spec_file": item.get("spec_file")}
-
+        if item.get("note"):
+            row["notes"].append(item["note"])
+        scale = item.get("scale", 1)
+        if scale is None:
+            scale = 1
+        if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0:
+            row["status"] = "refused"
+            row["reason"] = "масштаб должен быть положительным числом"
+            out.append(row)
+            continue
         sheet, note = resolve_sheet(wb, item["sheet"], strict=strict)
         if note:
             row["notes"].append(note)
@@ -241,34 +253,45 @@ def _read_workbook(wb, card, year, upto, kind):
             row["status"] = "refused"; row["reason"] = note; out.append(row); continue
         row["sheet"] = sheet
         if sheet not in cache:
-            ws = wb[sheet]; g = sheet_grid(ws); cache[sheet] = (ws, g, find_period_axis(g))
-        ws, grid, axis = cache[sheet]
+            ws = wb[sheet]; g = sheet_grid(ws)
+            try:
+                axis, axis_error = find_period_axis(g), None
+            except ValueError as exc:
+                axis, axis_error = None, str(exc)
+            cache[sheet] = (ws, g, axis, axis_error)
+        ws, grid, axis, axis_error = cache[sheet]
 
         if item.get("column_label"):
-            got, err = read_by_column(grid, ws, item, strict=strict)
+            got, err = read_by_column(grid, ws, item, strict=strict,
+                                      formula_wb=formula_wb)
             if err:
                 row["status"] = "refused"; row["reason"] = err; out.append(row); continue
             value, r, mode = got
             row["row"] = r
             period = item.get("period") or upto or "текущий"
             row["values"] = {period: value}
-            row["notes"].append(item.get("note") or "оперативное значение, период не закрыт")
-            if mode == 'substring':
-                row["notes"].append("метка найдена неточно")
             row["status"] = "ok_with_notes"; out.append(row); continue
 
         if item.get("cell"):
-            value, err = read_cell(ws, grid, item, strict=strict)
+            value, err = read_cell(ws, grid, item, strict=strict,
+                                   formula_wb=formula_wb)
             if err:
                 row["status"] = "refused"; row["reason"] = err; out.append(row); continue
             period = item.get("period") or upto or ""
             row["values"] = {period: value} if period else {"текущий": value}
-            row["notes"].append(item.get("note") or "оперативное значение, период не закрыт")
             row["status"] = "ok_with_notes"; out.append(row); continue
 
         if not axis:
-            row["status"] = "refused"; row["reason"] = "ось периодов не распознана"; out.append(row); continue
-        _, cols = axis
+            row["status"] = "refused"; row["reason"] = axis_error or "ось периодов не распознана"; out.append(row); continue
+        header_row, cols = axis
+        base_year = (year or card.get("year") or 0) + (item.get("year_offset") or 0)
+        explicit_years = {int(value) for header in grid[:header_row + 1]
+                          for col in cols.values()
+                          for value in re.findall(r"\b(?:19|20)\d{2}\b", str(header[col]))}
+        if explicit_years and explicit_years != {base_year}:
+            row["status"] = "refused"
+            row["reason"] = f"год в шапке {sorted(explicit_years)} не совпадает с годом карты {base_year}"
+            out.append(row); continue
         first = min(cols.values())
 
         def series(labels, kind):
@@ -277,35 +300,25 @@ def _read_workbook(wb, card, year, upto, kind):
                 return None, (f"меток не найдено" if not hits
                               else f"неоднозначно: {len(hits)} строк {[h + 1 for h in hits]}"), None
             r = hits[0]
-            fmt = ws.cell(r + 1, first + 1).number_format
-            pct = fmt.endswith('%')
-            scale = item.get("scale") or 1
             vals = {}
             for m, c in sorted(cols.items()):
-                v = grid[r][c]
-                if v is None or not isinstance(v, (int, float)):
-                    continue
                 base_year = (year or card.get('year') or 0) + (item.get("year_offset") or 0)
                 period = f"{base_year}-{m:02d}"
                 if kind == "факт" and upto and not item.get("year_offset"):
                     if period > upto:
                         continue
-                    # Текущий (незакрытый) месяц: ноль здесь означает «ещё не заполнено»,
-                    # а не «ноль продаж» — в прошлых месяцах ноль остаётся значением.
-                    if period == upto and v == 0:
-                        continue
-                vals[period] = round(v * 100, 2) if pct else v * scale
-            if mode == 'substring':
-                row["notes"].append(f"{kind}: метка найдена неточно")
+                address = ws.cell(r + 1, c + 1).coordinate
+                value, err = read_numeric_cell(ws, formula_wb, sheet, address, item)
+                if err:
+                    row["notes"].append(f"{kind} {period}: {err}")
+                    continue
+                vals[period] = value
             return r + 1, None, vals
 
         r, err, vals = series(item["labels"], kind)
         if err:
             row["status"] = "refused"; row["reason"] = err; out.append(row); continue
         row["row"] = r; row["values"] = vals
-        now = dt.date.today().strftime("%Y-%m")
-        if kind == "факт" and now in vals:
-            row["notes"].append(f"{now} — месяц не закрыт, значение неокончательное")
         if item.get("expected_row") and item["expected_row"] != r:
             row["notes"].append(f"строка была {item['expected_row']}, стала {r} — книга разошлась с описанием метрики")
         if item.get("plan_labels") and "plan_source" not in item:
@@ -323,9 +336,15 @@ def read(book, card, year=None, upto=None):
     """Публичный вход: upto по умолчанию — текущий месяц."""
     year = year or card.get("year")
     upto = upto or dt.date.today().strftime("%Y-%m")
-    rows = _read_impl(book, card, year, upto)
+    try:
+        rows = _read_impl(book, card, year, upto)
+    except (OSError, TypeError, ValueError, zipfile.BadZipFile, openpyxl.utils.exceptions.InvalidFileException) as exc:
+        rows = [{"metric": item["name"], "unit": item.get("unit"), "notes": [],
+                 "values": {}, "plan": {}, "status": "refused",
+                 "reason": f"источник факта не прочитан: {exc}",
+                 "companion": bool(item.get("year_offset"))} for item in card["metrics"]]
     for item, row in zip(card["metrics"], rows):
-        if "plan_source" not in item or row["status"] == "refused":
+        if "plan_source" not in item:
             continue
         source = item["plan_source"]
         row["plan"] = {}
@@ -337,7 +356,7 @@ def read(book, card, year=None, upto=None):
             plan_item.setdefault("sheet", item["sheet"])
             plan_item.setdefault("unit", item.get("unit"))
             plan_item.setdefault("scale", 1)
-            # Новый адрес плана всегда проверяется строго; старый plan_labels остаётся совместимым.
+            # Все адреса плана проверяются дословно, как адрес факта.
             plan_item["strict_labels"] = True
             if not plan_item.get("sheet"):
                 raise ValueError("лист плана не указан")
@@ -365,7 +384,8 @@ def read(book, card, year=None, upto=None):
         except (OSError, TypeError, ValueError, zipfile.BadZipFile, openpyxl.utils.exceptions.InvalidFileException) as exc:
             row["notes"].append(f"план не прочитан: {exc}")
             row["plan_status"] = "refused"
-        row["status"] = "ok" if not row["notes"] else "ok_with_notes"
+        if row["status"] != "refused":
+            row["status"] = "ok" if not row["notes"] else "ok_with_notes"
     return rows
 
 
@@ -376,13 +396,15 @@ def render(rows, source_note=None):
         lines.append(source_note); lines.append("")
     for row in rows:
         head = f"**{row['metric']}**" + (f" ({row['unit']})" if row.get("unit") else "")
-        if row["status"] == "refused":
+        if row["status"] == "refused" and not row["plan"]:
             lines.append(f"{head}: значения нет — {row['reason']}"); lines.append(""); continue
-        periods = sorted(row["values"])
+        periods = sorted(set(row["values"]) | set(row["plan"]))
+        if row["status"] == "refused":
+            head += f" — факт недоступен: {row['reason']}"
         lines.append(head + (f" — {'; '.join(row['notes'])}" if row["notes"] else ""))
         lines.append("| период | " + " | ".join(periods) + " |")
         lines.append("|---" * (len(periods) + 1) + "|")
-        lines.append("| факт | " + " | ".join(str(row["values"][p]) for p in periods) + " |")
+        lines.append("| факт | " + " | ".join(str(row["values"].get(p, "—")) for p in periods) + " |")
         if row["plan"]:
             lines.append("| план | " + " | ".join(str(row["plan"].get(p, "—")) for p in periods) + " |")
         lines.append("")
@@ -403,7 +425,7 @@ def main():
         print(json.dumps(rows, ensure_ascii=False, indent=2))
     else:
         print(render(rows, card.get("source_note")))
-    return 0 if any(r["status"] != "refused" for r in rows) else 1
+    return 0 if any(r["status"] != "refused" or r["plan"] for r in rows) else 1
 
 
 if __name__ == "__main__":

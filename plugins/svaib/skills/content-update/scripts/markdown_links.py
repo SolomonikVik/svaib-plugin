@@ -38,20 +38,41 @@ def _escaped(text, pos):
 
 
 def _code_mask(text):
-    """Hide fenced blocks and code spans without changing source offsets."""
+    """Hide code without changing offsets; list-contained indented code is unsupported."""
     chars = list(text)
     fence = None
+    indented = False
+    list_indent = None
+    previous_blank = True
     offset = 0
     for line in text.splitlines(keepends=True):
+        expanded = line.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip(" "))
+        blank = not line.strip()
+        marker = re.match(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+", expanded)
+        # A blank line does not end a list: four spaces may still introduce a
+        # real link in its continuation. Only mask unambiguous standalone code.
+        if list_indent is not None and not blank and previous_blank and indent < list_indent:
+            list_indent = None
         match = re.match(r"^ {0,3}([" + chr(96) + r"~]{3,})(.*)$", line)
         if fence:
             _blank(chars, offset, offset + len(line))
             if re.fullmatch(r" {0,3}" + re.escape(fence[0]) + "{"
                             + str(len(fence)) + r",}[ \t]*\n?", line):
                 fence = None
+        elif (indented and (blank or indent >= 4)) or (
+                indent >= 4 and previous_blank and list_indent is None):
+            indented = True
+            _blank(chars, offset, offset + len(line))
         elif match and len(set(match[1])) == 1:
+            indented = False
             fence = match[1]
             _blank(chars, offset, offset + len(line))
+        else:
+            indented = False
+            if marker:
+                list_indent = marker.end()
+        previous_blank = blank
         offset += len(line)
     visible = "".join(chars)
     tick = chr(96)
@@ -110,8 +131,12 @@ def _label(text):
     return " ".join(text.split()).casefold()
 
 
-def link_destinations(text):
-    """Yield (source line, destination) for used inline/reference links."""
+def link_targets(text):
+    """Yield (source line, destination, start, end) for used link targets.
+
+    Offsets delimit the original destination without optional angle brackets.
+    Reference uses point at their definition, so callers can rewrite it once.
+    """
     visible = _code_mask(text)
     chars = list(visible)
     definitions = {}
@@ -125,7 +150,9 @@ def link_destinations(text):
         destination, end = parsed
         ending = _DEFINITION_END.match(text, end)
         if ending:
-            definitions.setdefault(_label(label), destination)
+            start = match.end() + (text[match.end():match.end() + 1] == "<")
+            stop = end - (text[match.end():match.end() + 1] == "<")
+            definitions.setdefault(_label(label), (destination, start, stop))
             _blank(chars, match.start(), ending.end())
     visible = "".join(chars)
     links = []
@@ -138,7 +165,9 @@ def link_destinations(text):
         destination, end = parsed
         ending = _INLINE_END.match(text, end)
         if ending:
-            links.append((match.start(), destination))
+            start = match.end() + (text[match.end():match.end() + 1] == "<")
+            stop = end - (text[match.end():match.end() + 1] == "<")
+            links.append((match.start(), destination, start, stop))
             _blank(chars, match.start(), ending.end())
     for match in _REFERENCE.finditer("".join(chars)):
         if _escaped(text, match.start()):
@@ -146,9 +175,15 @@ def link_destinations(text):
         group = 2 if match[2] else 1
         label = text[slice(*match.span(group))]
         if _label(label) in definitions:
-            links.append((match.start(), definitions[_label(label)]))
-    for pos, destination in sorted(links):
-        yield text.count("\n", 0, pos) + 1, destination
+            links.append((match.start(), *definitions[_label(label)]))
+    for pos, destination, start, end in sorted(links):
+        yield text.count("\n", 0, pos) + 1, destination, start, end
+
+
+def link_destinations(text):
+    """Yield (source line, destination) for used inline/reference links."""
+    for line, destination, _, _ in link_targets(text):
+        yield line, destination
 
 
 def broken_links(md):

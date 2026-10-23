@@ -19,7 +19,7 @@ extractor, либо через calculator. Чтение отдаёт ряды, �
 """
 from __future__ import annotations
 
-import argparse, json, sys
+import argparse, copy, json, sys
 from pathlib import Path
 
 PERCENT_UNITS = {"%", "percent", "процент", "проценты"}
@@ -27,6 +27,16 @@ PERCENT_UNITS = {"%", "percent", "процент", "проценты"}
 
 def is_percent(row):
     return str(row.get("unit") or "").strip().lower() in PERCENT_UNITS
+
+
+def calculable(row):
+    return row.get("status") != "refused" and bool(row.get("values")) and not row.get("companion")
+
+
+def same_unit(left, right):
+    if is_percent(left) and is_percent(right):
+        return True
+    return str(left.get("unit") or "").strip().lower() == str(right.get("unit") or "").strip().lower()
 
 
 def prev_period(period):
@@ -51,13 +61,11 @@ def year_ago(period):
 
 def derive(rows, period=None):
     """Производные по каждой метрике за выбранный период (по умолчанию — последний с фактом)."""
-    by_name = {r["metric"]: r for r in rows}
     out = []
     for row in rows:
-        if row.get("status") == "refused" or not row.get("values"):
+        if not calculable(row):
             continue
-        if row.get("companion"):
-            continue    # ряд «год назад» — опора для роста, а не самостоятельная метрика
+        percent = is_percent(row)
         vals = row["values"]
         p = period or max(vals)
         res = {"metric": row["metric"], "unit": row.get("unit"), "period": p, "derived": {}, "notes": []}
@@ -68,7 +76,10 @@ def derive(rows, period=None):
         res["fact"] = fact
 
         plan = (row.get("plan") or {}).get(p)
-        if plan == 0:
+        if percent and plan is not None:
+            res["plan"] = plan
+            res["derived"]["отклонение от плана, п.п."] = round(fact - plan, 2)
+        elif plan == 0:
             res["notes"].append("план равен нулю — выполнение не считается")
         elif plan is not None:
             res["derived"]["выполнение плана, %"] = round(fact / plan * 100, 1)
@@ -77,41 +88,59 @@ def derive(rows, period=None):
 
         prev = prev_period(p)
         if prev and prev in vals:
-            res["derived"]["изменение к прошлому периоду"] = round(fact - vals[prev], 2)
-            if not is_percent(row) and vals[prev]:
+            key = "изменение к прошлому периоду, п.п." if percent else "изменение к прошлому периоду"
+            res["derived"][key] = round(fact - vals[prev], 2)
+            if not percent and vals[prev]:
                 res["derived"]["изменение к прошлому периоду, %"] = round(
                     (fact - vals[prev]) / abs(vals[prev]) * 100, 1)
 
         # Прошлый год: либо в этом же ряду, либо отдельной метрикой-компаньоном.
-        # Компаньон опознаётся по имени: оно должно содержать имя основной метрики
-        # («MRR» → «MRR год назад»). Не нашли — говорим об этом вслух: молчаливо
+        # Полное служебное имя связывает ряд с одной метрикой. Подстрока может
+        # связать MRR с Новым MRR. Дубли не сворачиваем: это неоднозначность.
+        # Не нашли — говорим об этом вслух: молчаливо
         # пропущенная производная выглядит как «роста нет», а не «не с чем сравнить».
         ya = year_ago(p)
         base = vals.get(ya)
         if base is None:
-            for other in by_name.values():
-                if other is row or other.get("status") == "refused":
-                    continue
-                if row["metric"] in other["metric"] and ya in (other.get("values") or {}):
-                    base = other["values"][ya]; break
-        if is_percent(row):
-            pass                                    # у процента роста в процентах не бывает
+            candidates = [other for other in rows
+                          if other is not row and other.get("status") != "refused"
+                          and other.get("companion") and same_unit(row, other)
+                          and other["metric"] == row["metric"] + " год назад"
+                          and ya in (other.get("values") or {})]
+            if len(candidates) == 1:
+                base = candidates[0]["values"][ya]
+            elif len(candidates) > 1:
+                res["notes"].append(f"неоднозначный ряд прошлого года: {len(candidates)} записей "
+                                    f"«{row['metric']} год назад» за {ya}")
+        if percent and base is not None:
+            res["year_ago"] = base
+            res["derived"]["изменение к прошлому году, п.п."] = round(fact - base, 2)
         elif base in (None, 0):
             res["notes"].append(
                 f"рост к прошлому году не посчитан: нет значения за {ya}. "
                 f"Нужен ряд прошлого года — в той же метрике или отдельной записью карты "
-                f"с year_offset: -1 и именем, содержащим «{row['metric']}»")
+                f"с year_offset: -1 и точным именем «{row['metric']} год назад»")
         else:
             res["derived"]["рост к прошлому году, %"] = round((fact - base) / abs(base) * 100, 1)
             res["year_ago"] = base
 
-        if is_percent(row):
+        if percent:
             res["notes"].append("метрика в процентах: разница показана в пунктах, "
                                 "агрегаты и средние по ней не считаются")
         for n in row.get("notes", []):
             res["notes"].append(n)
         out.append(res)
     return out
+
+
+def build_report(rows, period=None):
+    """Исходные строки плюс расчёты: отказ, план без факта и пометки не исчезают."""
+    calculations = iter(derive(rows, period))
+    report = copy.deepcopy(rows)
+    for source, result in zip(rows, report):
+        if calculable(source):
+            result["calculation"] = next(calculations)
+    return report
 
 
 def render(items):
@@ -137,8 +166,12 @@ def main():
     ap.add_argument("--values", required=True, help="выход read_metrics.py --json")
     ap.add_argument("--period", help="период, за который считать (YYYY-MM); по умолчанию последний с фактом")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--complete", action="store_true", help="полный результат чтения с расчётами, JSON")
     a = ap.parse_args()
     rows = json.loads(Path(a.values).read_text(encoding="utf-8"))
+    if a.complete:
+        print(json.dumps(build_report(rows, a.period), ensure_ascii=False, indent=2))
+        return 0
     items = derive(rows, a.period)
     print(json.dumps(items, ensure_ascii=False, indent=2) if a.json else render(items))
     return 0
