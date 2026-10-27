@@ -13,10 +13,10 @@ status: draft
 ## Содержимое папки
 
 - [00_general.md](00_general.md) — общий файл: что верно для любого канонического файла.
-- [overview.md](overview.md) — `01_overview.md`, обзор узла.
+- [overview.md](overview.md) — `01_overview.md`, обзор: что это за объект, куда идёт и на каком этапе.
 - [active.md](active.md) — `02_active.md`, текущая работа.
 - [backlog.md](backlog.md) — `03_backlog.md`, будущая работа.
-- [progress.md](progress.md) — `04_progress.md`, хроника.
+- [progress.md](progress.md) — `04_progress.md`, прогресс: как двигался объект управления.
 - [decisions.md](decisions.md) — `05_decisions.md`, журнал решений.
 - [meeting-summary.md](meeting-summary.md) — `summary.md` в папке встречи, выжимка встречи: где она лежит; форму задаёт спецификация разбора встречи.
 - [reference.md](reference.md) — `person.md`, `profile.md`, `architecture.md`, `setup.md`, `glossary.md`, `speech-aliases.md`, с необязательным `NN_`: общие правила шести видов справочных файлов; структура каждого — из его шаблона.

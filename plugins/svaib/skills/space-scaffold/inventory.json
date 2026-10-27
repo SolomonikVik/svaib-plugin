@@ -1,6 +1,6 @@
 {
   "plugin": "svaib",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "skills": [
     "content-update",
     "metrics-intake",
@@ -16,6 +16,7 @@
     "roles-team",
     "send-telegram",
     "space-align",
+    "space-consistency",
     "space-scaffold",
     "space-toolbox",
     "team-person-review",

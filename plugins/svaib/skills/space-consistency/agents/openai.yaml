@@ -1,0 +1,3 @@
+interface:
+  display_name: "Проверка согласованности"
+  short_description: "Противоречия, дубли и источники истины"
