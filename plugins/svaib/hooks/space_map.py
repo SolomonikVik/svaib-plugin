@@ -101,7 +101,13 @@ SCOUT_BLOCK = """\
 
 # Метка карты — правило доставки хуками (whoami, подкарта при входе); одна для Claude и Codex.
 LABEL_BLOCK = """\
-**`map_profile` в контексте.** Динамическую карту узнавай по отдельной строке с `map_profile` и значением профиля, поданной хуком; упоминания метки в этой инструкции картой не считаются. Кто пользователь — имя, профиль, зона — бери из неё. `map_profile` нет или он `general` — вызови `whoami` (MCP svaib), подкарта зоны придёт сама; `whoami` недоступен — пользователя не угадывай и имя не подставляй. Подкарта узла приходит сама при первом обращении к его файлам — чтением, поиском или командой; после первого обращения учти пришедшую подкарту до выводов об устройстве и составе узла. Динамической секции нет — для поиска неизвестного адреса ходи по `README.md` папок; известный файл читай сразу."""
+**`map_profile` в контексте.** Динамическую карту узнавай по отдельной строке с `map_profile` и значением профиля, поданной хуком; упоминания метки в этой инструкции картой не считаются. Кто пользователь — имя, профиль, зона — бери из неё. `map_profile` нет или он `general` — сначала проверь привязку `.svaib/platform.json` ближайшего пространства.
+
+Без привязки и при выбранном локальном сценарии работай с файлами объявленной папки без `whoami`, `update_me`, создания аккаунта или компании. Человек может представиться в разговоре; доступный локальный профиль читай по README. Серверную личность, членство и ID компании из этого не выводи. Для первоначального пути svaib начни с онбординга: он продолжает настройку после Telegram, проверяет аккаунт и выбранную реальную компанию, открывает серверный MCP Screen-конструктор в BB; после подтверждения структуры файлы готовит и проверяет агент со `space-scaffold`. Локальный самостоятельный Screen не является этим маршрутом. Локальный результат не ставит серверные отметки онбординга.
+
+Серверные возможности подключай, когда человек их выбрал. Для аккаунта без компании вызови `whoami` (MCP svaib) без `company_id`, помоги заполнить имя, email и настройки через `update_me`; создание компании для этого не требуется. Для работы с серверной компанией подключи онбординг: `list_my_companies`, явный выбор компании (создание — только по поручению пользователя), атомарная запись привязки помощником онбординга, затем `whoami` с выбранным `company_id`. Данные аккаунта не дают роль или доступ к компании; до её выбора не записывай путь к локальному профилю как профиль её участника. При повреждённой привязке или отказе хука не повторяй `whoami` и не выбирай компанию из родительской папки; исправление привязки согласуй с пользователем. Это останавливает операции серверной компании, а не порученную локальную работу с файлами. Для серверных операций при корректной привязке вызови `whoami` с её `company_id`, подкарта зоны придёт сама. Перепривязка к другой компании требует явного выбора и нового чистого чата. `whoami` недоступен — серверную личность не угадывай; имя для локального разговора можно узнать у человека.
+
+Подкарта узла приходит сама при первом обращении к его файлам — чтением, поиском или командой; после первого обращения учти пришедшую подкарту до выводов об устройстве и составе узла. Динамической секции нет — для поиска неизвестного адреса ходи по `README.md` папок; известный файл читай сразу."""
 
 # Раздел стабильной модели — в AGENTS.md корня (канон scaffold: инструкция в AGENTS.md,
 # CLAUDE.md — импорт `@AGENTS.md`; один текст для обеих платформ)
@@ -851,7 +857,7 @@ def space_rules(base: Path) -> str:
     body = clean_block(body, RULES_LIMIT)
     if not body:
         return ""
-    return (f"## Требования владельца пространства (`{RULES_FILE}`)\n\nСтаршинство — `AGENTS.md`, раздел "
+    return (f"## Правила пространства (`{RULES_FILE}`)\n\nСтаршинство — `AGENTS.md`, раздел "
             "«Что дополняет эту инструкцию».\n\n" + body)
 
 
@@ -882,10 +888,18 @@ def parse_whoami(raw) -> dict:
     data = tool_payload(raw)
     if not isinstance(data, dict) or not data.get("subject_id"):
         raise ValueError("в ответе whoami нет subject_id")
+    for key in ("account_id", "company_id"):
+        if data.get(key) is not None and not isinstance(data[key], str):
+            raise ValueError(f"в ответе whoami некорректное поле {key}")
+    tenant = str(data.get("tenant_id") or "")
+    company = data.get("company_id") or ""
+    if tenant and company and tenant != company:
+        raise ValueError("в ответе whoami company_id не совпадает с tenant_id")
     ws = data.get("workspace") or {}
     return {"subject": str(data["subject_id"]), "name": clean_name(data.get("display_name")),
             "preferences": clean_block(data.get("preferences"), PREFERENCES_LIMIT),
-            "tenant": str(data.get("tenant_id") or ""),
+            "tenant": tenant or company, "company_id": company,
+            "account_id": data.get("account_id") or "",
             "role": str(data.get("role") or ""), "about": str(data.get("about") or ""),
             "profile_path": str(ws.get("profile_path") or ""),
             "onboarding": data["onboarding"] if isinstance(data.get("onboarding"), dict) else None}
@@ -983,6 +997,19 @@ def onboarding_block(rec: dict) -> str:
         if not stages:
             return ""
         done, nxt = onboarding_near(stages, ob, rec.get("role", ""))
+        # The initial four groups finish with real work before general catalog
+        # follow-ons. This is a view of existing marks, never a second status.
+        initial = ("user.connect", "user.space", "user.profile", "user.zone", "user.first-work")
+        catalog = {s.get("id"): s for s in stages if isinstance(s, dict)}
+        marks = ob.get("marks") if isinstance(ob.get("marks"), dict) else {}
+        if all(sid in catalog for sid in initial) and any(
+                not isinstance(marks.get(sid), dict) or marks[sid].get("state") != "done"
+                for sid in initial):
+            priority = {sid: -100 + i for i, sid in enumerate(initial)}
+            ordered = [dict(s, order=priority.get(s.get("id"), s.get("order"))) for s in stages]
+            _, candidates = onboarding_near(ordered, ob, rec.get("role", ""))
+            nxt = [s for s in candidates if s["id"] in priority][:1]
+
         if not done and not nxt:
             return ""
         marks = ob.get("marks") if isinstance(ob.get("marks"), dict) else {}
@@ -1024,6 +1051,7 @@ def personalize(base: Path, who: dict, units_override: list[str] | None = None) 
     units = [u for u in units if u in units_all]
     rec = {"subject": who["subject"], "name": who.get("name", ""), "preferences": who.get("preferences", ""),
            "tenant": who.get("tenant", ""), "role": who.get("role", ""),
+           "company_id": who.get("company_id", ""), "account_id": who.get("account_id", ""),
            "profile_path": who.get("profile_path", ""), "units": units, "unit_source": source,
            "onboarding": who.get("onboarding")}
     lines = [f"{who_line(who['subject'], who.get('name', ''))}, профиль "

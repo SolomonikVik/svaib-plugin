@@ -1,6 +1,6 @@
 {
   "plugin": "svaib",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "skills": [
     "content-update",
     "metrics-intake",
@@ -34,8 +34,20 @@
       ]
     },
     {
+      "script": "company_context.py",
+      "events": []
+    },
+    {
       "script": "hook_space.py",
       "events": []
+    },
+    {
+      "script": "inject_company.py",
+      "events": [
+        "PostCompact",
+        "PreToolUse",
+        "SessionStart"
+      ]
     },
     {
       "script": "inject_file_spec.py",

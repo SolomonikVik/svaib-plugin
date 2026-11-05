@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Callable
 
 ROOT_MARKERS = ("CLAUDE.md", "AGENTS.md")  # README.md есть у каждого узла — не маркер
@@ -28,11 +29,11 @@ def has_root_marker(path: str) -> bool:
     return any(os.path.isfile(os.path.join(path, name)) for name in ROOT_MARKERS)
 
 
-def _walk_up(start: str):
-    """Каталоги от start вверх, не доходя до $HOME: в домашнем каталоге может лежать чужой маркер."""
+def _walk_up(start: str, *, stop_at_home: bool = True):
+    """Каталоги от start вверх; по умолчанию без HOME, где может лежать чужой маркер."""
     home = os.path.abspath(os.path.expanduser("~"))
     current = os.path.abspath(start)
-    while os.path.normcase(current) != os.path.normcase(home):
+    while not stop_at_home or os.path.normcase(current) != os.path.normcase(home):
         yield current
         parent = os.path.dirname(current)
         if parent == current:
@@ -40,8 +41,39 @@ def _walk_up(start: str):
         current = parent
 
 
+def _svaib_directory(path: str) -> bool:
+    try:
+        mode = os.lstat(os.path.join(path, ".svaib")).st_mode
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise ValueError("workspace_boundary_invalid") from error
+    if not stat.S_ISDIR(mode):
+        raise ValueError("workspace_boundary_invalid")
+    return True
+
+
+def find_svaib_root(start: str) -> str | None:
+    """Ближайшая `.svaib/` от выбранного хостом start, без запасного поиска по маркерам.
+
+    Содержимое привязки не проверяется: неполное пространство уже останавливает подъём.
+    Невалидная запись `.svaib` прекращает поиск с отказом, не открывает родительскую базу.
+    Путь сохраняет запись хоста, в том числе симлинк, как и остальные корни навигации.
+    """
+    for path in _walk_up(start, stop_at_home=False):
+        if _svaib_directory(path):
+            return path
+    return None
+
+
 def find_root(start: str) -> str | None:
-    """Самый ВЕРХНИЙ каталог с маркером: у узлов тоже бывает свой CLAUDE.md."""
+    """Ближайшая `.svaib/`; только без неё — самый верхний CLAUDE.md/AGENTS.md."""
+    try:
+        space = find_svaib_root(start)
+    except ValueError:
+        return None
+    if space is not None:
+        return space
     found = None
     for path in _walk_up(start):
         if has_root_marker(path):
@@ -71,10 +103,15 @@ def workspace_root(on_ambiguous: Callable[[int, int, list[str]], None] | None = 
     подъём к корню. Несколько папок: пространство — та, где лежит `.svaib/`, остальные просто
     подключены; ни одной или больше одной — корня нет."""
     folders = _workspace_folders()
-    if len(folders) == 1:
-        path = folders[0]
-        return path if has_root_marker(path) else find_root(path)
-    spaces = [path for path in folders if os.path.isdir(os.path.join(path, ".svaib"))]
+    try:
+        if len(folders) == 1:
+            path = folders[0]
+            if _svaib_directory(path):
+                return path
+            return path if has_root_marker(path) else find_root(path)
+        spaces = [path for path in folders if _svaib_directory(path)]
+    except ValueError:
+        return None
     if len(spaces) == 1:
         return spaces[0]
     if folders and on_ambiguous:
@@ -86,19 +123,36 @@ def _cowork() -> bool:
     return os.environ.get("CLAUDE_CODE_IS_COWORK") == "1" and bool((os.environ.get("CLAUDE_CODE_WORKSPACE_HOST_PATHS") or "").strip())
 
 
+def claude_project_dir() -> str | None:
+    """Исходный каталог Claude от хоста; Bash cd не меняет эту привязку сессии."""
+    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not project or "\0" in project or not os.path.isabs(project) or not os.path.isdir(project):
+        return None
+    return os.path.abspath(project)
+
+
 def resolve_root(hook_input: dict, on_ambiguous: Callable[[int, int, list[str]], None] | None = None,
                  *, use_claude_env: bool = True) -> str | None:
     """Корень сессии. Cowork с подключёнными папками — их ответ окончательный, отказ тоже:
-    служебные CLAUDE_PROJECT_DIR и cwd привели бы к чужому маркеру. Иначе CLAUDE_PROJECT_DIR
-    с маркером — корень, даже если выше есть другой; иначе верхний маркер от cwd.
+    служебные CLAUDE_PROJECT_DIR и cwd привели бы к чужому маркеру. Иначе исходный каталог
+    CLAUDE_PROJECT_DIR задаёт сессию: ближайшая `.svaib/` важнее AGENTS-маркера подпапки.
+    Только без `.svaib/` сохраняется навигационный fallback по маркерам.
     Codex передаёт use_claude_env=False: окружение Claude не определяет его пространство."""
     if not isinstance(hook_input, dict):
         return None
     if use_claude_env and _cowork():
         return workspace_root(on_ambiguous)
-    project = os.environ.get("CLAUDE_PROJECT_DIR") if use_claude_env else None
-    if project and os.path.isdir(project) and has_root_marker(project):
-        return os.path.abspath(project)
+    project = claude_project_dir() if use_claude_env else None
+    if project:
+        try:
+            space = find_svaib_root(project)
+        except ValueError:
+            return None
+        if space is not None:
+            return space
+        if has_root_marker(project):
+            return project
+        return find_root(project)
     start = hook_input.get("cwd") or os.getcwd()
     if not isinstance(start, str) or "\0" in start:
         return None
@@ -110,7 +164,7 @@ def _foreign(path: str, real_root: str) -> bool:
     for current in _walk_up(os.path.realpath(path)):
         if os.path.normcase(current) == os.path.normcase(real_root):
             return False
-        if has_root_marker(current) or os.path.isdir(os.path.join(current, ".svaib")):
+        if has_root_marker(current) or _svaib_directory(current):
             return True
     return False
 

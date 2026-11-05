@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" first-prompt",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" first-prompt auto",
             "timeout": 15,
             "statusMessage": "Карта пространства — в начале разговора"
           },
@@ -20,22 +20,22 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__.*__whoami",
+        "matcher": "^mcp__(?:svaib|plugin_svaib_svaib)__whoami$",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-whoami",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-whoami auto",
             "timeout": 15,
             "statusMessage": "Карта вашей зоны — после входа в svaib"
           }
         ]
       },
       {
-        "matcher": "mcp__.*__update_me",
+        "matcher": "^mcp__(?:svaib|plugin_svaib_svaib)__update_me$",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-update-me",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-update-me auto",
             "timeout": 15,
             "statusMessage": "Ваши настройки и путь освоения — после изменения"
           }
@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" node-enter",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" node-enter auto",
             "timeout": 15,
             "statusMessage": "Карта папки — при первом обращении к ней"
           }
@@ -55,11 +55,21 @@
     ],
     "SessionStart": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_company.py\" auto",
+            "timeout": 5,
+            "statusMessage": "Компания пространства — начало разговора"
+          }
+        ]
+      },
+      {
         "matcher": "compact|clear",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" compact",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" compact auto",
             "timeout": 15,
             "statusMessage": "Карта пространства — после сжатия разговора"
           },
@@ -92,6 +102,17 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "^mcp__(?:svaib|plugin_svaib_svaib)__.*$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_company.py\" auto",
+            "timeout": 5,
+            "statusMessage": "Компания пространства — перед обращением к платформе"
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|MultiEdit|apply_patch|Bash|PowerShell|exec_command|shell|local_shell|unified_exec|mcp__workspace__bash",
         "hooks": [
           {
@@ -115,6 +136,16 @@
       }
     ],
     "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_company.py\" auto",
+            "timeout": 5,
+            "statusMessage": "Компания пространства — после сжатия разговора"
+          }
+        ]
+      },
       {
         "hooks": [
           {

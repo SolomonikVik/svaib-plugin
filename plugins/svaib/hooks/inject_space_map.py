@@ -113,12 +113,24 @@ def nested_mode() -> str:
 NODE_LEAD = "`map_node: {node}` — адреса файлов узла бери отсюда, не угадывай."
 
 ASK_WHOAMI = (
-    "Кто пользователь и его зона ответственности — от серверной части svaib: **вызови `whoami` (MCP svaib) "
+    "Пространство привязано к компании серверной части svaib. Кто пользователь и его зона ответственности — "
+    "от серверной части: **вызови `whoami` (MCP svaib) "
     "первым действием** — до его ответа не обращайся к пользователю по имени и не считай его владельцем "
     "пространства; персональная подкарта зоны придёт в контекст автоматически (хук), ничего "
     "копировать и запускать не нужно. Если `workspace.profile_path` в ответе пуст — спроси, где в "
     "пространстве лежит профиль пользователя, и запиши через `update_me`. Если MCP svaib недоступен — "
     "пользователя не угадывай и имя не подставляй; при неясности спроси."
+)
+ASK_COMPANY = (
+    "Персонализация требует привязки ближайшего пространства в `.svaib/platform.json`. "
+    "Если файла нет, `whoami` без компании доступен для знакомства с пользователем; "
+    "данные аккаунта можно заполнить через `update_me`. Профиль в файлах пространства пока не требуй. "
+    "Для работы с компанией вызови `list_my_companies` (MCP svaib): "
+    "явный выбор или создание компании, атомарная запись привязки помощником онбординга, затем `whoami`. "
+    "Ошибка аргумента company_id исправляется повтором в том же разговоре без этого поля: хук возьмёт ID из привязки. "
+    "Повреждённая привязка или изменение закреплённого контекста требуют исправления с пользователем; не повторяй "
+    "отказавший `whoami` и не выбирай компанию из родительской папки. Для другой компании нужен новый "
+    "чистый чат. До корректного `whoami` пользователя не угадывай и имя не подставляй."
 )
 
 
@@ -154,8 +166,24 @@ def _cowork_ambiguous(count: int, total: int, folders: list[str]) -> None:
           % (total, count), file=sys.stderr)
 
 
-def resolve_root(hook_input: dict) -> str | None:
-    return hook_space.resolve_root(hook_input, _cowork_ambiguous)
+def resolve_root(hook_input: dict, *, host: str = "auto") -> str | None:
+    effective_host = host
+    if host == "auto":
+        try:
+            from inject_company import detect_host
+            effective_host = detect_host(hook_input)
+        except (ImportError, OSError, ValueError):
+            # Legacy local navigation may use native cwd, never inherited Claude
+            # env. Company/profile authority remains blocked by inspect_context.
+            cwd = hook_input.get("cwd") if isinstance(hook_input, dict) else None
+            if not isinstance(cwd, str) or not os.path.isabs(cwd) or not os.path.isdir(cwd):
+                return None
+            return hook_space.resolve_root(hook_input, _cowork_ambiguous,
+                                           use_claude_env=False)
+    if effective_host == "claude" and os.environ.get("CLAUDE_CODE_IS_COWORK") == "1":
+        return hook_space.workspace_root(_cowork_ambiguous)
+    return hook_space.resolve_root(hook_input, _cowork_ambiguous,
+                                   use_claude_env=effective_host != "codex")
 
 
 def load_generator(root: str):
@@ -633,11 +661,12 @@ def gc_markers() -> None:
 
 # ---------------------------------------------------------------------------- сборка контекста
 
-def map_context(gen, root: str, when: str, ask: bool, session_id: str = "") -> tuple[str, dict]:
+def map_context(gen, root: str, when: str, ask: bool, session_id: str = "", *,
+                identity_allowed: bool = True, company_ready: bool = True) -> tuple[str, dict]:
     """Карта (персональная после whoami в этой сессии, иначе общая)."""
     from pathlib import Path
     base = Path(root)
-    identity = gen.read_session(session_id, base)
+    identity = gen.read_session(session_id, base) if identity_allowed else None
     no_model = model_in_root(root)
     personal = bool(identity)
     units = list(identity.get("units") or []) if personal else []
@@ -659,7 +688,7 @@ def map_context(gen, root: str, when: str, ask: bool, session_id: str = "") -> t
         head = (f"## Карта пространства {when}\n\n"
                 f"`map_profile: general` — карта общая, пользователь не установлен.")
         if ask:
-            head += "\n\n" + ASK_WHOAMI
+            head += "\n\n" + (ASK_WHOAMI if company_ready else ASK_COMPANY)
     meta = {"profile": identity["subject"] if personal else "general", "units": units, "no_model": no_model}
     if body.startswith("## Карта пространства"):
         body = body.split("\n", 1)[1].lstrip("\n")  # H2 генератора — лишний, заголовок даёт хук
@@ -688,7 +717,23 @@ def node_context(gen, root: str, node: str) -> str:
     return f"## Подкарта узла `{node}/`\n\n" + NODE_LEAD.format(node=node) + "\n\n" + body
 
 
+def onboarding_skill_hint() -> str:
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "skills" / "onboarding" / "SKILL.md"
+    if not path.is_file():
+        return ""
+    return (f"Для продолжения онбординга svaib прочитай установленный скилл по точному пути `{path}`. "
+            "Путь получен из текущего плагина; не присоединяй aliases r0/r1 к другому корню. "
+            "Пока первые четыре группы не завершены, ближайший шаг — первое непройденное из "
+            "user.connect → user.space → user.profile → user.zone → user.first-work. "
+            "Общий каталог и account setup next_step не заменяют этот порядок.")
+
+
 def emit(context: str, event: str) -> None:
+    if context.startswith(("## Карта пространства", "## Персонализация карты")):
+        hint = onboarding_skill_hint()
+        if hint:
+            context += "\n\n" + hint
     print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": context}},
                      ensure_ascii=False))
 
@@ -698,11 +743,36 @@ EVENT = {"first-prompt": "UserPromptSubmit", "post-whoami": "PostToolUse", "node
 
 
 MODES = ("first-prompt", "post-whoami", "post-update-me", "node-enter", "compact", "plain")
-WHOAMI_RE = re.compile(r"^mcp__.+__whoami$")
-UPDATE_ME_RE = re.compile(r"^mcp__.+__update_me$")
+def svaib_operation(value) -> str | None:
+    try:
+        from inject_company import tool_operation
+        return tool_operation(value)
+    except ImportError:
+        return None
 
 
-def run(mode: str, hook_input: dict) -> None:
+def company_view(hook_input: dict, root: str, host: str = "auto"):
+    """Read-only view: the map cannot establish or repair company authority."""
+    from pathlib import Path
+    from inject_company import inspect_context
+    return inspect_context(hook_input, Path(root), host=host)
+
+
+def identity_matches_company(identity: dict | None, view, tool_input=None) -> bool:
+    if not identity or view.status not in ("absent", "fresh", "pinned") or not view.company_id:
+        return False
+    if identity.get("tenant") != view.company_id:
+        return False
+    if identity.get("company_id") not in (None, "", view.company_id):
+        return False
+    if identity.get("account_id") and view.status != "pinned":
+        return False
+    if isinstance(tool_input, dict) and tool_input.get("company_id") not in (None, "", view.company_id):
+        return False
+    return True
+
+
+def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
     sid = hook_input.get("session_id") or ""
     nkey = node_key(hook_input)
     if mode not in MODES:
@@ -715,16 +785,21 @@ def run(mode: str, hook_input: dict) -> None:
             return
         if marker_exists(sid):
             return
-    if mode == "node-enter" and WHOAMI_RE.match(hook_input.get("tool_name") or ""):
+    operation = svaib_operation(hook_input.get("tool_name"))
+    if mode == "node-enter" and operation == "whoami":
         # Codex: отдельной регистрации на whoami у него нет, вызов приходит сюда —
         # персонализация та же, что у Claude по matcher `mcp__.*__whoami`
         mode = "post-whoami"
-    if mode == "node-enter" and UPDATE_ME_RE.match(hook_input.get("tool_name") or ""):
+    if mode == "node-enter" and operation == "update_me":
         mode = "post-update-me"   # то же для update_me
-    root = resolve_root(hook_input)
+    root = resolve_root(hook_input, host=host)
     if not root:
         if mode == "node-enter":
             return  # чтение вне пространства — не наше дело, лог не засорять
+        if mode in ("first-prompt", "compact"):
+            hint = onboarding_skill_hint()
+            if hint:
+                emit(hint, EVENT[mode])
         log("skip", mode=mode, reason="no root", cwd=hook_input.get("cwd"))
         print("inject_space_map: корень пространства не найден", file=sys.stderr)
         return
@@ -750,6 +825,27 @@ def run(mode: str, hook_input: dict) -> None:
         log("skip", mode=mode, reason="no generator", root=root)
         print("inject_space_map: генератор карты не найден — карта не подана", file=sys.stderr)
         return
+    view = None
+    if mode != "node-enter":
+        try:
+            view = company_view(hook_input, root, host)
+        except (ImportError, OSError, ValueError) as exc:
+            # Missing context code is a partial package, not legacy authority.
+            log("skip", mode=mode, reason=f"company context unavailable: {exc}")
+        if mode in ("post-whoami", "post-update-me"):
+            expected = "whoami" if mode == "post-whoami" else "update_me"
+            if operation != expected:
+                return
+            from pathlib import Path
+            identity = (gen.parse_whoami(hook_input.get("tool_response")) if mode == "post-whoami"
+                        else gen.read_session(sid, Path(root)))
+            if view is None or not identity_matches_company(identity, view, hook_input.get("tool_input")):
+                log("skip", mode=mode, reason="identity company context mismatch")
+                if mode == "post-whoami":
+                    context, _ = map_context(gen, root, "после `whoami`", ask=True, session_id=sid,
+                                             identity_allowed=False, company_ready=False)
+                    emit(context, event)
+                return
     if mode == "post-update-me":
         from pathlib import Path
         ok = gen.apply_update_me(Path(root), sid, hook_input.get("tool_response"))
@@ -761,7 +857,11 @@ def run(mode: str, hook_input: dict) -> None:
         context, meta = "\n\n".join(node_context(gen, root, n) for n in nodes), {"node": "+".join(nodes), "event": event, "tool": tool}
     else:
         when = {"compact": "после сжатия контекста"}.get(mode, "на первом запросе сессии")
-        context, meta = map_context(gen, root, when, ask=(mode != "plain"), session_id=sid)
+        from pathlib import Path
+        identity_ok = view is not None and identity_matches_company(gen.read_session(sid, Path(root)), view)
+        ready = view is not None and view.status in ("absent", "fresh", "pinned") and bool(view.company_id)
+        context, meta = map_context(gen, root, when, ask=(mode != "plain"), session_id=sid,
+                                    identity_allowed=identity_ok, company_ready=ready)
     if mode == "first-prompt" and not marker_set(sid):
         return  # параллельный запуск уже доставил
     if mode == "node-enter":
@@ -793,7 +893,8 @@ def main():
             pass
     try:   # чтение и разбор ввода — внутри той же границы: битый байт в stdin не роняет хук
         raw = sys.stdin.read()
-        run(mode, json.loads(raw) if raw.strip() else {})
+        host = sys.argv[2] if len(sys.argv) > 2 else "auto"
+        run(mode, json.loads(raw) if raw.strip() else {}, host=host)
     except Exception as e:  # noqa: BLE001 — хук не имеет права уронить сессию
         log("error", mode=mode, error=f"{type(e).__name__}: {e}")
         print(f"inject_space_map: {type(e).__name__}: {e}", file=sys.stderr)
