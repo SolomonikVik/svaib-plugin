@@ -2,7 +2,7 @@
 """Atomically bind an existing workspace after an explicit company choice.
 
 No network or credentials are used. Rebinding requires the previously observed
-company ID; it never deletes conversation pins. Start a clean chat afterwards.
+company ID. It does not manage conversation state.
 """
 
 from __future__ import annotations

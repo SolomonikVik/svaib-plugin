@@ -1,6 +1,6 @@
 {
   "plugin": "svaib",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "skills": [
     "content-update",
     "metrics-intake",
@@ -44,9 +44,7 @@
     {
       "script": "inject_company.py",
       "events": [
-        "PostCompact",
-        "PreToolUse",
-        "SessionStart"
+        "PreToolUse"
       ]
     },
     {

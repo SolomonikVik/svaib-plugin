@@ -128,7 +128,7 @@ ASK_COMPANY = (
     "Для работы с компанией вызови `list_my_companies` (MCP svaib): "
     "явный выбор или создание компании, атомарная запись привязки помощником онбординга, затем `whoami`. "
     "Ошибка аргумента company_id исправляется повтором в том же разговоре без этого поля: хук возьмёт ID из привязки. "
-    "Повреждённая привязка или изменение закреплённого контекста требуют исправления с пользователем; не повторяй "
+    "Повреждённая привязка требует исправления с пользователем; не повторяй "
     "отказавший `whoami` и не выбирай компанию из родительской папки. Для другой компании нужен новый "
     "чистый чат. До корректного `whoami` пользователя не угадывай и имя не подставляй."
 )
@@ -174,7 +174,7 @@ def resolve_root(hook_input: dict, *, host: str = "auto") -> str | None:
             effective_host = detect_host(hook_input)
         except (ImportError, OSError, ValueError):
             # Legacy local navigation may use native cwd, never inherited Claude
-            # env. Company/profile authority remains blocked by inspect_context.
+            # env. Personalization still checks the current workspace binding.
             cwd = hook_input.get("cwd") if isinstance(hook_input, dict) else None
             if not isinstance(cwd, str) or not os.path.isabs(cwd) or not os.path.isdir(cwd):
                 return None
@@ -752,20 +752,18 @@ def svaib_operation(value) -> str | None:
 
 
 def company_view(hook_input: dict, root: str, host: str = "auto"):
-    """Read-only view: the map cannot establish or repair company authority."""
+    """Read the current file binding without session authority or history."""
     from pathlib import Path
-    from inject_company import inspect_context
-    return inspect_context(hook_input, Path(root), host=host)
+    from company_context import inspect_context
+    return inspect_context(Path(root))
 
 
 def identity_matches_company(identity: dict | None, view, tool_input=None) -> bool:
-    if not identity or view.status not in ("absent", "fresh", "pinned") or not view.company_id:
+    if not identity or view.status != "bound" or not view.company_id:
         return False
     if identity.get("tenant") != view.company_id:
         return False
     if identity.get("company_id") not in (None, "", view.company_id):
-        return False
-    if identity.get("account_id") and view.status != "pinned":
         return False
     if isinstance(tool_input, dict) and tool_input.get("company_id") not in (None, "", view.company_id):
         return False
@@ -859,7 +857,7 @@ def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
         when = {"compact": "после сжатия контекста"}.get(mode, "на первом запросе сессии")
         from pathlib import Path
         identity_ok = view is not None and identity_matches_company(gen.read_session(sid, Path(root)), view)
-        ready = view is not None and view.status in ("absent", "fresh", "pinned") and bool(view.company_id)
+        ready = view is not None and view.status == "bound" and bool(view.company_id)
         context, meta = map_context(gen, root, when, ask=(mode != "plain"), session_id=sid,
                                     identity_allowed=identity_ok, company_ready=ready)
     if mode == "first-prompt" and not marker_set(sid):

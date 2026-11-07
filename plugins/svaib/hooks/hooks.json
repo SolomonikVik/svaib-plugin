@@ -55,16 +55,6 @@
     ],
     "SessionStart": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_company.py\" auto",
-            "timeout": 5,
-            "statusMessage": "Компания пространства — начало разговора"
-          }
-        ]
-      },
-      {
         "matcher": "compact|clear",
         "hooks": [
           {
@@ -136,16 +126,6 @@
       }
     ],
     "PostCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_company.py\" auto",
-            "timeout": 5,
-            "statusMessage": "Компания пространства — после сжатия разговора"
-          }
-        ]
-      },
       {
         "hooks": [
           {
