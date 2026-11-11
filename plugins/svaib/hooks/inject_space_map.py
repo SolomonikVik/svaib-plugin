@@ -183,7 +183,7 @@ def resolve_root(hook_input: dict, *, host: str = "auto") -> str | None:
     if effective_host == "claude" and os.environ.get("CLAUDE_CODE_IS_COWORK") == "1":
         return hook_space.workspace_root(_cowork_ambiguous)
     return hook_space.resolve_root(hook_input, _cowork_ambiguous,
-                                   use_claude_env=effective_host != "codex")
+                                   use_claude_env=effective_host not in {"codex", "pi"})
 
 
 def load_generator(root: str):

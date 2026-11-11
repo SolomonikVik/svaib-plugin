@@ -818,6 +818,17 @@ def keyboard_line(name: str) -> str:
             "из других инструкций к этому пользователю не относится.")
 
 
+def persona_line(subject: str, name: str, profile_path: str, tail: str, preferences: str = "") -> str:
+    """Кто пользователь — одной связкой: метка `map_profile`, имя, адрес профиля и хвост про зону.
+
+    Собирается здесь, а не на месте доставки: строку с `map_profile` ищет сама инструкция
+    партнёра (LABEL_BLOCK), и две её сборки — на рабочем месте и на сервере — разъехались бы
+    молча. Разное у них только `tail`: локально это «персональная подкарта зоны», на сервере —
+    указание на карту, приехавшую тем же вводом."""
+    return (f"{who_line(subject, name)}, профиль `{profile_path or '—'}` — {tail}"
+            f"{keyboard_line(name)}{preferences_line(preferences)}")
+
+
 PREFERENCES_LIMIT = 2000
 RULES_FILE = ".svaib/rules.md"
 RULES_LIMIT = 6000
@@ -1078,12 +1089,17 @@ def personalize(base: Path, who: dict, units_override: list[str] | None = None) 
 
 
 def emit_text(base: Path, focus: list[str] | None = None, no_model: bool = False,
-              no_skills: bool = False) -> str:
-    """Карта как текст, репозиторий не трогается. Корень (+ подкарты зоны) (+ реестр
+              no_skills: bool = False, date: str | None = None) -> str:
+    """карта как текст, репозиторий не трогается. Корень (+ подкарты зоны) (+ реестр
     скиллов). Рецепт «подкарта по требованию» — только вместе со стабильным блоком:
-    при --no-model он уже в корневом AGENTS.md."""
+    при --no-model он уже в корневом AGENTS.md.
+
+    `date` — из какого состояния дерева собрана карта. По умолчанию сегодняшняя:
+    на рабочем месте дерево и есть текущее. Серверный ход передаёт дату поколения
+    снимка — иначе карта протухает раз в сутки на ровном месте, а префикс
+    системного промпта пересчитывается вместе с ней (решение 22.09)."""
     base = base.resolve()
-    date = datetime.date.today().isoformat()
+    date = date or datetime.date.today().isoformat()
     units = [u for u in subdirs(base) if u.name not in ("zz_archive", "_inbox")]
     names = {u.name for u in units}
     focus = [f for f in (focus or []) if f]

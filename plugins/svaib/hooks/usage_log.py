@@ -576,7 +576,7 @@ def rows(run: dict, m: dict, session_id: str) -> list[str]:
             seconds = max(0, round(a["last"] - a["start"]))
         out.append(line(run, session_id, ("субагент " + (a.get("kind") or "")).strip(), skill, version, how, harness,
                         a.get("models"), a, a.get("start") or run["start"], seconds,
-                        "оборван" if a.get("unfinished") else "завершён"))
+                        "ошибка" if a.get("error") else ("оборван" if a.get("unfinished") else "завершён")))
     return out
 
 

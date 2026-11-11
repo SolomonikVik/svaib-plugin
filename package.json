@@ -1,0 +1,23 @@
+{
+  "name": "svaib-plugin",
+  "version": "0.12.0",
+  "description": "Second Value AI Brain — скиллы, навигация по управленческому пространству и подключение к платформе svaib",
+  "private": true,
+  "keywords": [
+    "pi-package"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "pi-subagents": "0.87.0"
+  },
+  "pi": {
+    "extensions": [
+      "./plugins/svaib/pi/extension.ts"
+    ],
+    "skills": [
+      "./plugins/svaib/skills"
+    ]
+  }
+}

@@ -62,7 +62,7 @@ def workspace_cwd(raw: dict[str, Any], host: str) -> Path:
             cwd = hook_space.workspace_root()
         else:
             cwd = hook_space.claude_project_dir()
-    elif host == "codex":
+    elif host in {"codex", "pi"}:
         cwd = raw.get("cwd")
     else:
         raise CompanyContextError("native_host_unknown")
