@@ -1,12 +1,14 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { kimiToolPayload } from "./kimi-schema.ts";
 import { modelVisibleMcpResult } from "./mcp-result.ts";
 import { usageSnapshot } from "./usage-snapshot.ts";
 import { registerDelegation } from "./delegation.ts";
+import { MapContext, hasContext } from "./map-context.ts";
 import { Type } from "typebox";
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, getAgentDir, VERSION,
@@ -15,7 +17,9 @@ import {
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const stateType = "svaib-pi-state-v1";
-const contextType = "svaib-pi-map";
+const contextType = "svaib-pi-context";
+const oldContextTypes = new Set([contextType, "svaib-pi-map", "svaib-pi-tool-context"]);
+const nodeEventTools = new Set(["read", "grep", "find", "ls", "bash", "powershell"]);
 const packageVersion = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version;
 const runtimeVersion = VERSION;
 
@@ -89,11 +93,40 @@ const bridge = (mode: string, ctx: ExtensionContext, extra = {}) =>
   }), mode.startsWith("usage-") ? undefined : ctx.signal);
 const contextText = (result: any) => result?.hookSpecificOutput?.additionalContext || result?.context || "";
 
+function journal(stage: string, ctx: ExtensionContext, data: Record<string, unknown>) {
+  try {
+    const dir = process.env.SVAIB_STATE_DIR || (process.platform === "win32"
+      ? resolve(process.env.LOCALAPPDATA || resolve(homedir(), "AppData/Local"), "svaib")
+      : resolve(homedir(), ".local/state/svaib"));
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(resolve(dir, "space-map-delivery.log"), JSON.stringify({
+      ts: new Date().toISOString(), harness: "pi", stage,
+      session_id: `pi-${ctx.sessionManager.getSessionId()}`, ...data,
+    }) + "\n", { encoding: "utf8", mode: 0o600 });
+  } catch { /* Diagnostics must not break the user's turn. */ }
+}
+
 export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {}) {
   let stopPrompt = "";
   let resetSpecs = false;
   let latestText = "";
   let usagePrompt = "";
+  const map = new MapContext();
+  let contextKey = "";
+  let request = 0;
+  let generation = 0;
+  let contextHash = "";
+  const updateMap = async (mode: string, ctx: ExtensionContext, extra = {}, refreshed = false) => {
+    const eventId = randomUUID();
+    const result = await bridge(mode, ctx, { ...extra, request_id: request, event_id: eventId });
+    map.apply(result, refreshed);
+    if (contextText(result)) {
+      generation++;
+      contextHash = createHash("sha256").update(map.text).digest("hex");
+      journal("generation-received", ctx, { event: mode, event_id: eventId, request_id: request, generation, hash: contextHash, chars: map.text.length });
+    }
+    return result;
+  };
   if (!options.child) registerDelegation(pi, resolve(root, "pi/child-extension.ts"));
 
   // Use Pi's native MCP and its native credential store, including OAuth refresh.
@@ -104,6 +137,8 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
   if (!options.child) pi.registerMcpServer("svaib", { url: mcp.url, exposure: "direct" });
 
   pi.on("before_provider_request", (event, ctx) => {
+    journal("model-input-observed", ctx, { request_id: request, generation, hash: contextHash,
+      present: hasContext(event.payload, map.text), boundary: "before_provider_request" });
     if (ctx.model?.provider === "kimi-coding") return kimiToolPayload(event.payload);
   });
 
@@ -113,6 +148,8 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
     latestText = "";
     usagePrompt = "";
     resetSpecs = true;
+    map.clear();
+    contextKey = "";
   };
   pi.on("session_start", (event, ctx) => {
     restoreBranch(event, ctx);
@@ -125,13 +162,24 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
 
   pi.on("agent_start", async (_event, ctx) => {
     latestText = "";
-    await bridge("first-prompt", ctx);
+    const key = `${ctx.sessionManager.getSessionId()}\0${ctx.cwd}`;
+    if (contextKey !== key) {
+      map.clear();
+      contextKey = key;
+      await bridge("reset-specs", ctx);
+      const initial = await updateMap("first-prompt", ctx);
+      if (!initial.parts?.some((part: any) => part.kind === "map")) {
+        await updateMap("compact", ctx, {}, true);
+      }
+      resetSpecs = false;
+    }
   });
 
   pi.on("session_compact", () => { resetSpecs = true; });
   // Runs for automatic compaction/overflow recovery inside a turn too.
   pi.on("context", async (event, ctx) => {
     if (ctx.signal?.aborted) return;
+    request++;
     // agent_start can precede persistence of the incoming user entry in BB.
     // This boundary sees the actual prompt id and closes the previous run.
     const prompt = nativeEvent(ctx).prompt_id;
@@ -139,16 +187,27 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
       await bridge("usage-prompt", ctx);
       usagePrompt = prompt;
     }
+    const changed = map.changed();
+    if (changed.length) journal("source-invalidation", ctx, { request_id: request, generation,
+      changed_count: changed.length, binding_changed: changed.some(path => /[/\\]\.svaib[/\\]platform\.json$/.test(path)) });
+    if (changed.some(path => /[/\\]\.svaib[/\\]platform\.json$/.test(path))) {
+      map.clear();
+      resetSpecs = true;
+    }
     if (resetSpecs) {
       await bridge("reset-specs", ctx);
       // Re-open node maps lost to compaction. Identity is read from shared state.
-      await bridge("compact", ctx);
+      await updateMap("compact", ctx, {}, true);
       resetSpecs = false;
+    } else if (!map.text || changed.length) {
+      await updateMap("refresh", ctx, { context_nodes: map.nodeIds }, true);
     }
-    const map = contextText(await bridge("plain", ctx));
-    if (!map) return;
-    return { messages: [...event.messages.filter((m: any) => m.customType !== contextType), {
-      role: "custom", customType: contextType, content: map, display: false, timestamp: Date.now(),
+    const text = map.text;
+    if (!text) return;
+    journal("emission", ctx, { request_id: request, generation, hash: contextHash, chars: text.length,
+      confirmation: "context-transform-returned; provider observation logged separately" });
+    return { messages: [...event.messages.filter((m: any) => !oldContextTypes.has(m.customType)), {
+      role: "custom", customType: contextType, content: text, display: false, timestamp: Date.now(),
     }] };
   });
 
@@ -174,16 +233,16 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
     // A failed whoami is never identity. update_me conflicts can carry the
     // current onboarding object, which the shared hook knows how to merge.
     if (event.isError && !/^mcp__(?:svaib|plugin_svaib_svaib)__update_me$/.test(event.toolName)) return visible;
-    const result = await bridge("node-enter", ctx, {
+    // Match the registered PostToolUse events, rather than starting Python for
+    // unrelated write/delegation results that the shared map handler ignores.
+    if (!nodeEventTools.has(event.toolName)
+        && !/^mcp__(?:svaib|plugin_svaib_svaib)__(?:whoami|update_me)$/.test(event.toolName)) return visible;
+    await updateMap("node-enter", ctx, {
       hook_event_name: "PostToolUse", tool_name: event.toolName, tool_input: event.input,
       tool_use_id: event.toolCallId,
       // Pi's structuredContent is the full original MCP CallToolResult, one
       // envelope above the server's own structuredContent. Avoid nesting again.
       tool_response: event.structuredContent ?? { content: event.content },
-    });
-    const map = contextText(result);
-    if (map) pi.sendMessage({ customType: "svaib-pi-tool-context", content: map, display: false }, {
-      deliverAs: "steer", triggerTurn: false,
     });
     return visible;
   });

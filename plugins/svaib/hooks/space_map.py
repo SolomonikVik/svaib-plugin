@@ -170,8 +170,8 @@ ON_DEMAND_BLOCK = """\
 
 def coverage_line(base: Path, units, listed_files: int) -> str:
     """Карта перечисляет верхние юниты; файлы в ней — выборка без обхода дерева."""
-    return (f" Покрытие: management units {len(units)} — все верхнего уровня; "
-            f"файлов с адресом в карте {listed_files} — выборка, полное дерево проверяй листингом.")
+    return (f" Показаны все объекты управления верхнего уровня ({len(units)}) и выборка файлов с адресами ({listed_files}). "
+            "Полное дерево проверяй по списку файлов и папок.")
 
 
 def read_head(path: Path, limit: int = 40):
@@ -447,7 +447,7 @@ def node_map(node: Path, base: Path, deep: bool = False) -> str:
             lines.append("")
             lines.extend(rt.split("\n"))
     lines.append("")
-    lines.append("Карта не полна: содержимое глубже — листингом. «В карте нет» ≠ «нет».")
+    lines.append("Карта неполная: содержимое на следующих уровнях проверяй по списку файлов и папок. «В карте нет» ≠ «нет».")
     return "\n".join(lines)
 
 
@@ -464,15 +464,15 @@ def root_map(base: Path, date: str, single: bool = False, coverage: str = "",
     if model:
         lines.append(MODEL_BLOCK.format(built=f"Карта собрана из дерева {date}. ", coverage=coverage))
     else:  # стабильный блок живёт в корневом файле пространства и приходит каждый ход — не дублировать
-        lines.append(f"Карта собрана из дерева {date}, глубина — management units и их первый уровень.{coverage}")
+        lines.append(f"Карта собрана по дереву на {date}. Глубина — объекты управления и их первый уровень.{coverage}")
     lines.append("")
     where = (" (подробные карты — ниже):" if single
              # emit без модели — доставка хуками (Claude Code): подкарта узла придёт при входе;
              # emit с моделью — сред без хуков (Codex/Cursor): подкарта по требованию (ON_DEMAND_BLOCK)
-             else " (подкарты зоны — ниже, остальных — при первом обращении к файлам узла):" if emit and not model
+             else " (подкарты зоны — ниже, остальных объектов — при первом обращении к файлам узла):" if emit and not model
              else " (подкарты зоны — ниже, остальных — по требованию: `--emit-node <узел>`):" if emit
              else " (подробная карта — в `CLAUDE.md` management unit):")
-    lines.append("**Management units**" + where)
+    lines.append("**Объекты управления**" + where)
     lines.append("")
     for d in subdirs(base):
         lines.append(describe_dir_line(d, base))
@@ -815,7 +815,7 @@ def clean_name(value) -> str:
 
 def who_line(subject: str, name: str) -> str:
     """Начало заголовка персональной карты: метка и, если известно, имя пользователя."""
-    return f"`map_profile: {subject}` — пользователь **{name}**" if name else f"`map_profile: {subject}` — пользователь"
+    return f"`map_profile: {subject}` — сотрудник **{name}**" if name else f"`map_profile: {subject}` — сотрудник"
 
 
 def keyboard_line(name: str) -> str:
@@ -858,7 +858,7 @@ def preferences_line(prefs: str) -> str:
     Там только отличия от умолчаний; поля нет или пусто — строки нет, действует канон."""
     if not prefs:
         return ""
-    return ("\n\n**Как работать с пользователем** — его настройки в svaib; старшинство — `AGENTS.md`, "
+    return ("\n\n**Как работать с пользователем** — его настройки в svaib. Порядок приоритета — в `AGENTS.md`, "
             "раздел «Что дополняет эту инструкцию»:\n\n" + prefs)
 
 
@@ -950,8 +950,8 @@ def profile_excerpt(base: Path, profile_path: str) -> str:
     if excerpt.endswith(" …"):
         tail = "\n\nПрофиль обрезан — полный текст в файле."
     elif rest:
-        tail = f"\n\nДругие разделы файла: {' · '.join(rest)} — в контекст не подаются, читай файл, когда нужно."
-    return f"\n\n**Профиль пользователя** — `{profile_path}`:\n\n{excerpt}{tail}"
+        tail = f"\n\nДругие разделы файла: {' · '.join(rest)}. Они не подаются в контекст; при необходимости читай файл."
+    return f"\n\n**Профиль сотрудника** — `{profile_path}`:\n\n{excerpt}{tail}"
 
 
 # Одна строка контекста хука: Claude Code больше 10 000 знаков не подаёт — кладёт в файл и даёт
@@ -996,7 +996,7 @@ def space_rules(base: Path) -> str:
     body = clean_block(body, RULES_LIMIT)
     if not body:
         return ""
-    return (f"## Правила пространства (`{RULES_FILE}`)\n\nСтаршинство — `AGENTS.md`, раздел "
+    return (f"## Правила пространства (`{RULES_FILE}`)\n\nПорядок приоритета — в `AGENTS.md`, раздел "
             "«Что дополняет эту инструкцию».\n\n" + body)
 
 
@@ -1173,7 +1173,7 @@ def onboarding_block(rec: dict) -> str:
                 title(s) + (f" (зачтён по `{src}`)" if src != s["id"] else "") for s, src in done))
         if nxt:
             lines.append("- дальше: " + "; ".join(todo(s) for s in nxt))
-        lines.append("- это выборка; отсутствие этапа в ней не означает отсутствие отметки")
+        lines.append("- здесь показана часть этапов; отсутствие этапа в списке не означает, что отметки нет")
         lines.append("- весь путь — скилл `onboarding`")
         return "\n".join(lines)
     except Exception:  # noqa: BLE001 — блок онбординга не имеет права уронить карту
@@ -1213,7 +1213,7 @@ def personalize(base: Path, who: dict, units_override: list[str] | None = None,
              f"{preferences_line(who.get('preferences', ''))}"
              f"{profile_excerpt(base, who.get('profile_path', '')) if personal else ''}"]
     if units:
-        lines.append(f"\n**Management units зоны** ({source}): " + " · ".join(f"`{u}/`" for u in units))
+        lines.append(f"\n**Объекты управления зоны** ({source}): " + " · ".join(f"`{u}/`" for u in units))
         goals = goals_context(base, who.get("profile_path", ""), units, source) if personal else ""
         if goals:
             lines.append("\n" + goals)
@@ -1261,8 +1261,8 @@ def emit_text(base: Path, focus: list[str] | None = None, no_model: bool = False
             parts.append(SCOUT_BLOCK)
     if zone_maps:
         zone = " · ".join(f"`{f}/`" for f in present)
-        parts.append(f"**Зона ответственности пользователя** — {zone}. Подробные карты этих "
-                     "management units — ниже; по вопросу из зоны адрес бери отсюда.")
+        parts.append(f"**Зона ответственности сотрудника** — {zone}. Подробные карты этих "
+                     "объектов управления — ниже. Если вопрос относится к зоне, бери адрес отсюда.")
         parts.extend(zone_maps)
     if missing:
         parts.append("Management units зоны, которых нет в дереве (подкарты не собраны): "

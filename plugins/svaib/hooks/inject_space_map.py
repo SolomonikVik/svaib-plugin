@@ -113,24 +113,31 @@ def nested_mode() -> str:
 NODE_LEAD = "`map_node: {node}` — адреса файлов узла бери отсюда, не угадывай."
 
 ASK_WHOAMI = (
-    "Пространство привязано к компании серверной части svaib. Кто пользователь и его зона ответственности — "
-    "от серверной части: **вызови `whoami` (MCP svaib) "
-    "первым действием** — до его ответа не обращайся к пользователю по имени и не считай его владельцем "
-    "пространства; персональная подкарта зоны придёт в контекст автоматически (хук), ничего "
-    "копировать и запускать не нужно. Если `workspace.profile_path` в ответе пуст — спроси, где в "
-    "пространстве лежит профиль пользователя, и запиши через `update_me`. Если MCP svaib недоступен — "
-    "пользователя не угадывай и имя не подставляй; при неясности спроси."
+    "Пространство привязано к компании в серверной части svaib. Серверная часть сообщает, кто пользователь "
+    "и какова его зона ответственности. **Вызови `whoami` (MCP svaib) первым действием**. "
+    "До ответа не обращайся к пользователю по имени и не считай его владельцем пространства. "
+    "Хук автоматически добавит персональную подкарту зоны в контекст; ничего копировать и запускать не нужно.\n\n"
+    "Если `workspace.profile_path` в ответе пуст, спроси, где в пространстве лежит профиль сотрудника, "
+    "и запиши путь через `update_me`. Если MCP svaib недоступен, не угадывай пользователя "
+    "и не подставляй имя; при неясности спроси."
 )
 ASK_COMPANY = (
     "Персонализация требует привязки ближайшего пространства в `.svaib/platform.json`. "
-    "Если файла нет, `whoami` без компании доступен для знакомства с пользователем; "
-    "данные аккаунта можно заполнить через `update_me`. Профиль в файлах пространства пока не требуй. "
-    "Для работы с компанией вызови `list_my_companies` (MCP svaib): "
-    "явный выбор или создание компании, атомарная запись привязки помощником онбординга, затем `whoami`. "
-    "Ошибка аргумента company_id исправляется повтором в том же разговоре без этого поля: хук возьмёт ID из привязки. "
-    "Повреждённая привязка требует исправления с пользователем; не повторяй "
-    "отказавший `whoami` и не выбирай компанию из родительской папки. Для другой компании нужен новый "
-    "чистый чат. До корректного `whoami` пользователя не угадывай и имя не подставляй."
+    "Без привязки и при выбранном локальном сценарии работай с файлами объявленной папки без `whoami`, "
+    "`update_me`, создания аккаунта или компании. Имя для локального разговора можно узнать у человека; "
+    "серверную личность, членство и ID компании из локальных файлов не выводи.\n\n"
+    "Серверные возможности подключай, только когда человек их выбрал. "
+    "Для выбранной работы с аккаунтом без компании вызови `whoami` без `company_id`; "
+    "данные аккаунта можно заполнить через `update_me`, создавать компанию для этого не требуется. "
+    "Профиль сотрудника в файлах пространства до выбора серверной компании не требуй.\n\n"
+    "Для выбранной работы с серверной компанией подключи онбординг: `list_my_companies` (MCP svaib), "
+    "явный выбор компании, атомарная запись привязки помощником онбординга, затем `whoami` с выбранным `company_id`. "
+    "Создание компании — только по поручению человека.\n\n"
+    "При корректной привязке ошибку аргумента `company_id` исправь повтором в том же разговоре без этого поля: "
+    "хук возьмёт ID из привязки. Повреждённую привязку исправляй только по согласованию с человеком; "
+    "не повторяй отказавший `whoami` и не выбирай компанию из родительской папки. "
+    "Это останавливает операции серверной компании, а не порученную локальную работу с файлами. "
+    "Для другой компании нужен явный выбор и новый чистый чат. До корректного `whoami` серверную личность не угадывай."
 )
 
 
@@ -290,12 +297,12 @@ def _literal_lead(pattern: str) -> str:
 
 
 def powershell_input(ti: dict, tool: str = "") -> bool:
-    """Диалект команды: имя инструмента, явная оболочка или обёртка Codex."""
-    if tool == "PowerShell":
-        return True
+    """Явная оболочка/обёртка, затем буквальный синтаксис и имя инструмента.
+
+    Codex может назвать PowerShell-команду Bash и не передать shell: один этот
+    ярлык не определяет диалект. Значения аргументов и подстановки не исполняются.
+    """
     shell = str(ti.get("shell") or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
-    if shell in {"pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
-        return True
     text = next((ti[k] for k in SHELL_INPUT_KEYS if isinstance(ti.get(k), str)), "")
     executable = re.match(r'''^\s*(?:&\s*)?(?:"([^"]+)"|'([^']+)'|([^\s"']+))''', text)
     if executable:
@@ -304,6 +311,12 @@ def powershell_input(ti: dict, tool: str = "") -> bool:
             return True
         if name.replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe") in {"bash", "sh", "zsh", "dash"}:
             return False
+    if shell in {"pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
+        return True
+    if shell.removesuffix(".exe") in {"bash", "sh", "zsh", "dash"}:
+        return False
+    if tool == "PowerShell" or literal_powershell_command(text):
+        return True
     return os.name == "nt" and tool not in {"Bash", "mcp__workspace__bash"} and not shell
 
 
@@ -386,6 +399,69 @@ def powershell_tokens(text: str) -> list[PowerShellToken]:
         i += 1
     flush()
     return out
+
+
+LITERAL_PS_COMMANDS = frozenset({
+    "get-content", "get-childitem", "set-content", "add-content", "out-file",
+    "copy-item", "move-item", "new-item", "clear-content", "rename-item", "tee-object",
+    "set-location", "push-location", "pop-location", "write-output", "write-host",
+})
+
+
+def literal_powershell_command(text: str) -> bool:
+    """Only a known, unquoted cmdlet at a command position disambiguates raw input.
+
+    Ambiguous aliases (cp/mv/tee/cd), quoted values, dynamic subexpressions and
+    Bash heredoc bodies cannot establish a PowerShell dialect.
+    """
+    tokens = powershell_tokens(text)
+    if any(ps_operator(token, {"<<"}) for token in tokens):
+        return False
+    command, dynamic, previous, candidates = True, 0, None, set()
+    for token in tokens:
+        if dynamic:
+            if ps_operator(token, {"("}):
+                dynamic += 1
+            elif ps_operator(token, {")"}):
+                dynamic -= 1
+            previous = token
+            continue
+        if ps_operator(token, {"("}):
+            if previous is not None and not previous.quoted and previous in {"$", "@"}:
+                dynamic = 1
+                command = False
+            else:
+                command = True
+        elif ps_operator(token, {";", "|", "||", "&&", "&"}):
+            command = True
+        elif ps_operator(token, {")"}):
+            command = False
+        elif command:
+            if not token.operator and not token.quoted and token.lower() in LITERAL_PS_COMMANDS:
+                candidates.add(token.lower())
+            command = False
+        previous = token
+    if not candidates:
+        return False
+    # A Bash-escaped quote is not a PowerShell escape. Confirm command
+    # positions in Bash's lexer too, so a cmdlet-looking word inside a real
+    # Bash value cannot change its dialect. This does not interpret any input.
+    import shlex
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|()\n")
+    lexer.whitespace, lexer.whitespace_split, lexer.commenters = " \t\r", True, ""
+    command = True
+    try:
+        for token in lexer:
+            if token and set(token) <= set(";&|()\n"):
+                command = True
+            elif command:
+                if token.lower() in candidates:
+                    return True
+                command = False
+    except ValueError:
+        # Backtick escaping can make valid PowerShell unparseable as Bash.
+        return True
+    return False
 
 
 def powershell_literal_arrays(tokens: list[PowerShellToken]) -> list[PowerShellToken]:
@@ -677,7 +753,7 @@ def map_context(gen, root: str, when: str, ask: bool, session_id: str = "", *,
         zone = ("зона " + " · ".join(f"`{u}/`" for u in units)) if units else "management units зоны не выведены"
         head = (f"## Карта пространства {when}\n\n"
                 f"{gen.who_line(identity['subject'], identity.get('name', ''))}, профиль "
-                f"`{identity.get('profile_path') or '—'}`, {zone} — установлен через `whoami` в этой сессии.")
+                f"`{identity.get('profile_path') or '—'}`, {zone} — личность установлена через `whoami` в этой сессии.")
         if not units:   # до блоков ниже: иначе фраза приклеивается к хвосту последнего из них
             head += (" Management units зоны не выведены — работай по общей карте: подкарта узла придёт "
                      "при первом обращении к его файлам.")
@@ -718,7 +794,7 @@ def personal_context(gen, root: str, mode: str, identity: dict | None) -> str:
     base = Path(root)
     if mode == "profile":
         text = gen.profile_excerpt(base, identity.get("profile_path", "")).lstrip("\n")
-        return f"## Профиль пользователя\n\n{text}" if text else ""
+        return f"## Профиль сотрудника\n\n{text}" if text else ""
     units, source = identity.get("units"), identity.get("unit_source")
     if units is None:   # ответ whoami: юниты считаем сами — запись сессии пишет параллельная команда
         units, source = gen.zone_units(base, identity)
@@ -739,11 +815,12 @@ def onboarding_skill_hint() -> str:
     path = Path(__file__).resolve().parent.parent / "skills" / "onboarding" / "SKILL.md"
     if not path.is_file():
         return ""
-    return ("Персонализация и сводка онбординга — контекст, а не поручение начать настройку. "
-            "Для приветствия и рабочего запроса не читай схему онбординга, не повторяй whoami, "
-            "не проверяй установку и не записывай отметки ради старта. "
-            "Незавершённые начальные этапы коротко подсвети; доступную работу продолжай. "
-            "Если онбординг уже поручен, продолжай ближайший незавершённый начальный этап после ответа человека, без нового приглашения; при паузе или смене задачи останови продвижение. "
+    return ("Персонализация и сводка онбординга дают контекст и сами по себе не поручают начать настройку. "
+            "При приветствии и рабочем запросе не читай схему онбординга, не повторяй whoami, "
+            "не проверяй установку и не записывай отметки только ради начала работы. "
+            "Коротко укажи незавершённые начальные этапы и продолжай доступную работу.\n\n"
+            "Если онбординг уже поручен, после ответа человека продолжай ближайший незавершённый начальный этап "
+            "без нового приглашения. При паузе или смене задачи останови продвижение.\n\n"
             f"Когда человек поручил продолжить онбординг или согласился на нужную настройку, прочитай `{path}`. "
             "Это точный путь текущего плагина.")
 
@@ -760,10 +837,11 @@ def emit(context: str, event: str) -> None:
 EVENT = {"first-prompt": "UserPromptSubmit", "post-whoami": "PostToolUse", "node-enter": "PostToolUse",
          "compact": "SessionStart"}
 # Профиль и цели зоны идут отдельными командами на whoami и после сжатия: у Claude Code и Codex
-# лимит — на строку одной команды. Pi подаёт карту своим сообщением без такого лимита — они в карте.
+# лимит — на строку одной команды. Pi вызывает те же обработчики последовательно
+# и сохраняет их результаты одним снимком для каждого запроса модели.
 
 
-MODES = ("first-prompt", "post-whoami", "post-update-me", "node-enter", "compact", "plain", "profile", "goals")
+MODES = ("first-prompt", "post-whoami", "post-update-me", "node-enter", "compact", "plain", "refresh", "profile", "goals")
 def svaib_operation(value) -> str | None:
     try:
         from inject_company import tool_operation
@@ -810,9 +888,9 @@ def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
         # Codex: отдельной регистрации на whoami у него нет, вызов приходит сюда —
         # персонализация та же, что у Claude по matcher `mcp__.*__whoami`
         mode, fallback = "post-whoami", True
-    # Свои команды профиля и целей есть у Claude Code и Codex на whoami и после сжатия. Pi и вызов,
-    # пришедший сюда мимо matcher whoami, их не получают — профиль и цели едут в карте.
-    inline_personal = host == "pi" or fallback
+    # В Pi мост вызывает те же отдельные обработчики. Запасной маршрут CC/Codex,
+    # пришедший мимо matcher whoami, сохраняет прежнюю подачу профиля и целей в карте.
+    inline_personal = fallback and host != "pi"
     if mode == "node-enter" and operation == "update_me":
         mode = "post-update-me"   # то же для update_me
     root = resolve_root(hook_input, host=host)
@@ -883,7 +961,9 @@ def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
         context = personal_context(gen, root, mode, identity)
         if context:
             emit(context, hook_input.get("hook_event_name") or "PostToolUse")
-        log("ok" if context else "skip", mode=mode, root=root, chars=len(context))
+        log("ok" if context else "skip", stage="generation", mode=mode,
+            hook_event=hook_input.get("hook_event_name") or "PostToolUse", session_id=sid,
+            request_id=hook_input.get("request_id"), event_id=hook_input.get("event_id"), root=root, chars=len(context))
         return
     if mode == "post-update-me":
         from pathlib import Path
@@ -895,7 +975,7 @@ def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
     elif mode == "node-enter":
         context, meta = "\n\n".join(node_context(gen, root, n) for n in nodes), {"node": "+".join(nodes), "event": event, "tool": tool}
     else:
-        when = {"compact": "после сжатия контекста"}.get(mode, "на первом запросе сессии")
+        when = {"compact": "после сжатия контекста", "refresh": "после обновления источников"}.get(mode, "на первом запросе сессии")
         from pathlib import Path
         identity_ok = view is not None and identity_matches_company(gen.read_session(sid, Path(root)), view)
         ready = view is not None and view.status == "bound" and bool(view.company_id)
@@ -918,7 +998,9 @@ def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
         print(context)
     else:
         emit(context, event)
-    log("ok", mode=mode, root=root, ms=int((time.monotonic() - t0) * 1000), chars=len(context), **meta)
+    log("ok", stage="generation", mode=mode, hook_event=event, session_id=sid,
+        request_id=hook_input.get("request_id"), event_id=hook_input.get("event_id"),
+        root=root, ms=int((time.monotonic() - t0) * 1000), chars=len(context), **meta)
     if sid and mode in ("first-prompt", "post-whoami", "compact"):
         if mode == "compact":
             node_markers_clear(sid)          # подкарты узлов ушли со сжатием — пустить снова

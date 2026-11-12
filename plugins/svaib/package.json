@@ -1,6 +1,6 @@
 {
   "name": "svaib-plugin",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Second Value AI Brain — скиллы, навигация по управленческому пространству и подключение к платформе svaib",
   "private": true,
   "keywords": [

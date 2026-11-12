@@ -1,6 +1,6 @@
 {
   "plugin": "svaib",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "skills": [
     "content-update",
     "metrics-intake",
@@ -64,6 +64,18 @@
       "events": [
         "PostToolUse",
         "SessionStart",
+        "UserPromptSubmit"
+      ]
+    },
+    {
+      "script": "launch.py",
+      "events": [
+        "PostCompact",
+        "PostToolUse",
+        "PreToolUse",
+        "SessionEnd",
+        "SessionStart",
+        "Stop",
         "UserPromptSubmit"
       ]
     },

@@ -5,14 +5,14 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" first-prompt auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_space_map.py first-prompt auto",
             "timeout": 15,
             "statusMessage": "Карта пространства — в начале разговора",
             "additionalContextLimit": 5000
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" prompt",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/usage_log.py prompt",
             "timeout": 10,
             "statusMessage": "Учёт работы скиллов — новый запрос"
           }
@@ -25,21 +25,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-whoami auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_space_map.py post-whoami auto",
             "timeout": 15,
             "statusMessage": "Карта вашей зоны — после входа в svaib",
             "additionalContextLimit": 5000
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" profile auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_space_map.py profile auto",
             "timeout": 15,
             "statusMessage": "Ваш профиль — после входа в svaib",
             "additionalContextLimit": 5000
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" goals auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_space_map.py goals auto",
             "timeout": 15,
             "statusMessage": "Цели вашей зоны — после входа в svaib",
             "additionalContextLimit": 5000
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-update-me auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_space_map.py post-update-me auto",
             "timeout": 15,
             "statusMessage": "Ваши настройки и путь освоения — после изменения"
           }
@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" node-enter auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_space_map.py node-enter auto",
             "timeout": 15,
             "statusMessage": "Карта папки — при первом обращении к ней",
             "additionalContextLimit": 5000
@@ -76,28 +76,28 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" compact auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_space_map.py compact auto",
             "timeout": 15,
             "statusMessage": "Карта пространства — после сжатия разговора",
             "additionalContextLimit": 5000
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" profile auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_space_map.py profile auto",
             "timeout": 15,
             "statusMessage": "Ваш профиль — после сжатия разговора",
             "additionalContextLimit": 5000
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" goals auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_space_map.py goals auto",
             "timeout": 15,
             "statusMessage": "Цели вашей зоны — после сжатия разговора",
             "additionalContextLimit": 5000
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_file_spec.py\" compact",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_file_spec.py compact",
             "timeout": 10,
             "statusMessage": "Требования к файлам — после сжатия разговора (Claude Code)"
           }
@@ -109,13 +109,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/check_deferred_actions.py\"",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/check_deferred_actions.py",
             "timeout": 15,
             "statusMessage": "Проверка обещаний «сделаю потом» — конец ответа"
           },
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" stop",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/usage_log.py stop",
             "timeout": 10,
             "statusMessage": "Учёт работы скиллов — конец ответа"
           }
@@ -128,7 +128,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_company.py\" auto",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_company.py auto",
             "timeout": 5,
             "statusMessage": "Компания пространства — перед обращением к платформе"
           }
@@ -139,7 +139,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_file_spec.py\" pre-write",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_file_spec.py pre-write",
             "timeout": 10,
             "statusMessage": "Требования к файлу — перед первой записью"
           }
@@ -150,7 +150,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" skill",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/usage_log.py skill",
             "timeout": 10,
             "statusMessage": "Учёт работы скиллов — запуск скилла или субагента"
           }
@@ -162,7 +162,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_file_spec.py\" compact",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/inject_file_spec.py compact",
             "timeout": 10,
             "statusMessage": "Требования к файлам — после сжатия разговора (Codex)"
           }
@@ -174,7 +174,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/usage_log.py\" end",
+            "command": "python3 -c \"import os,runpy,sys; r=os.environ.get('CLAUDE_PLUGIN_ROOT') or os.environ.get('PLUGIN_ROOT'); r or sys.exit('svaib: plugin root is not set'); runpy.run_path(os.path.join(r,'hooks/launch.py'),run_name='__main__')\" hooks/usage_log.py end",
             "timeout": 3,
             "statusMessage": "Учёт работы скиллов — конец сессии"
           }
