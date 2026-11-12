@@ -662,7 +662,8 @@ def gc_markers() -> None:
 # ---------------------------------------------------------------------------- сборка контекста
 
 def map_context(gen, root: str, when: str, ask: bool, session_id: str = "", *,
-                identity_allowed: bool = True, company_ready: bool = True) -> tuple[str, dict]:
+                identity_allowed: bool = True, company_ready: bool = True,
+                with_personal: bool = True) -> tuple[str, dict]:
     """Карта (персональная после whoami в этой сессии, иначе общая)."""
     from pathlib import Path
     base = Path(root)
@@ -673,17 +674,16 @@ def map_context(gen, root: str, when: str, ask: bool, session_id: str = "", *,
     body = gen.emit_text(base, focus=units, no_model=no_model,
                          no_skills=os.environ.get("SVAIB_MAP_SKILLS") != "1")
     if personal:
-        ceo = gen.is_ceo_profile(identity.get("profile_path", ""))
-        zone = ("зона " + " · ".join(f"`{u}/`" for u in units)) if units else (
-            "прямой маршрут к целям компании" if ceo else "management units зоны не выведены")
+        zone = ("зона " + " · ".join(f"`{u}/`" for u in units)) if units else "management units зоны не выведены"
         head = (f"## Карта пространства {when}\n\n"
                 f"{gen.who_line(identity['subject'], identity.get('name', ''))}, профиль "
                 f"`{identity.get('profile_path') or '—'}`, {zone} — установлен через `whoami` в этой сессии.")
-        if not units and not ceo:   # до блоков ниже: иначе фраза приклеивается к хвосту последнего из них
+        if not units:   # до блоков ниже: иначе фраза приклеивается к хвосту последнего из них
             head += (" Management units зоны не выведены — работай по общей карте: подкарта узла придёт "
                      "при первом обращении к его файлам.")
         head += (f"{gen.keyboard_line(identity.get('name', ''))}{gen.onboarding_block(identity)}"
-                 f"{gen.preferences_line(identity.get('preferences', ''))}")
+                 f"{gen.preferences_line(identity.get('preferences', ''))}"
+                 f"{gen.profile_excerpt(base, identity.get('profile_path', '')) if with_personal else ''}")
     else:
         head = (f"## Карта пространства {when}\n\n"
                 f"`map_profile: general` — карта общая, пользователь не установлен.")
@@ -693,20 +693,37 @@ def map_context(gen, root: str, when: str, ask: bool, session_id: str = "", *,
     if body.startswith("## Карта пространства"):
         body = body.split("\n", 1)[1].lstrip("\n")  # H2 генератора — лишний, заголовок даёт хук
     goals = gen.goals_context(base, identity.get("profile_path", ""), units,
-                              identity.get("unit_source", "")) if personal else ""
+                              identity.get("unit_source", "")) if personal and with_personal else ""
     rules = gen.space_rules(base)
     return head + ("\n\n" + goals if goals else "") + "\n\n" + body + ("\n\n" + rules if rules else ""), meta
 
 
-def personalize_context(gen, root: str, hook_input: dict) -> tuple[str, dict]:
+def personalize_context(gen, root: str, hook_input: dict, personal: bool = True) -> tuple[str, dict]:
     from pathlib import Path
     who = gen.parse_whoami(hook_input.get("tool_response"))
-    text, rec = gen.personalize(Path(root), who)
+    text, rec = gen.personalize(Path(root), who, personal=personal)
     try:
         gen.write_session(hook_input.get("session_id") or "", Path(root), rec)
     except OSError as exc:
         log("skip", mode="post-whoami", reason=f"session write failed: {exc}")
     return "## Персонализация карты (после `whoami`)\n\n" + text, {"profile": who["subject"], "units": rec["units"]}
+
+
+def personal_context(gen, root: str, mode: str, identity: dict | None) -> str:
+    """Профиль или цели зоны — каждый своей строкой контекста: вместе с картой они не влезают
+    в лимит одной команды хука у Claude Code и Codex."""
+    from pathlib import Path
+    if not identity:
+        return ""
+    base = Path(root)
+    if mode == "profile":
+        text = gen.profile_excerpt(base, identity.get("profile_path", "")).lstrip("\n")
+        return f"## Профиль пользователя\n\n{text}" if text else ""
+    units, source = identity.get("units"), identity.get("unit_source")
+    if units is None:   # ответ whoami: юниты считаем сами — запись сессии пишет параллельная команда
+        units, source = gen.zone_units(base, identity)
+    text = gen.goals_context(base, identity.get("profile_path", ""), units, source or "")
+    return gen.fit_context(text)[0] if text else ""
 
 
 def node_context(gen, root: str, node: str) -> str:
@@ -722,11 +739,13 @@ def onboarding_skill_hint() -> str:
     path = Path(__file__).resolve().parent.parent / "skills" / "onboarding" / "SKILL.md"
     if not path.is_file():
         return ""
-    return (f"Для продолжения онбординга svaib прочитай установленный скилл по точному пути `{path}`. "
-            "Путь получен из текущего плагина; не присоединяй aliases r0/r1 к другому корню. "
-            "Пока первые четыре группы не завершены, ближайший шаг — первое непройденное из "
-            "user.connect → user.space → user.profile → user.zone → user.first-work. "
-            "Общий каталог и account setup next_step не заменяют этот порядок.")
+    return ("Персонализация и сводка онбординга — контекст, а не поручение начать настройку. "
+            "Для приветствия и рабочего запроса не читай схему онбординга, не повторяй whoami, "
+            "не проверяй установку и не записывай отметки ради старта. "
+            "Незавершённые начальные этапы коротко подсвети; доступную работу продолжай. "
+            "Если онбординг уже поручен, продолжай ближайший незавершённый начальный этап после ответа человека, без нового приглашения; при паузе или смене задачи останови продвижение. "
+            f"Когда человек поручил продолжить онбординг или согласился на нужную настройку, прочитай `{path}`. "
+            "Это точный путь текущего плагина.")
 
 
 def emit(context: str, event: str) -> None:
@@ -740,9 +759,11 @@ def emit(context: str, event: str) -> None:
 
 EVENT = {"first-prompt": "UserPromptSubmit", "post-whoami": "PostToolUse", "node-enter": "PostToolUse",
          "compact": "SessionStart"}
+# Профиль и цели зоны идут отдельными командами на whoami и после сжатия: у Claude Code и Codex
+# лимит — на строку одной команды. Pi подаёт карту своим сообщением без такого лимита — они в карте.
 
 
-MODES = ("first-prompt", "post-whoami", "post-update-me", "node-enter", "compact", "plain")
+MODES = ("first-prompt", "post-whoami", "post-update-me", "node-enter", "compact", "plain", "profile", "goals")
 def svaib_operation(value) -> str | None:
     try:
         from inject_company import tool_operation
@@ -784,10 +805,14 @@ def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
         if marker_exists(sid):
             return
     operation = svaib_operation(hook_input.get("tool_name"))
+    fallback = False
     if mode == "node-enter" and operation == "whoami":
         # Codex: отдельной регистрации на whoami у него нет, вызов приходит сюда —
         # персонализация та же, что у Claude по matcher `mcp__.*__whoami`
-        mode = "post-whoami"
+        mode, fallback = "post-whoami", True
+    # Свои команды профиля и целей есть у Claude Code и Codex на whoami и после сжатия. Pi и вызов,
+    # пришедший сюда мимо matcher whoami, их не получают — профиль и цели едут в карте.
+    inline_personal = host == "pi" or fallback
     if mode == "node-enter" and operation == "update_me":
         mode = "post-update-me"   # то же для update_me
     root = resolve_root(hook_input, host=host)
@@ -844,13 +869,29 @@ def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
                                              identity_allowed=False, company_ready=False)
                     emit(context, event)
                 return
+    if mode in ("profile", "goals"):
+        from pathlib import Path
+        if (hook_input.get("hook_event_name") or "PostToolUse") == "PostToolUse":
+            if operation != "whoami":
+                return
+            identity, tool_input = gen.parse_whoami(hook_input.get("tool_response")), hook_input.get("tool_input")
+        else:
+            identity, tool_input = gen.read_session(sid, Path(root)), None
+        if view is None or not identity_matches_company(identity, view, tool_input):
+            log("skip", mode=mode, reason="identity company context mismatch")
+            return
+        context = personal_context(gen, root, mode, identity)
+        if context:
+            emit(context, hook_input.get("hook_event_name") or "PostToolUse")
+        log("ok" if context else "skip", mode=mode, root=root, chars=len(context))
+        return
     if mode == "post-update-me":
         from pathlib import Path
         ok = gen.apply_update_me(Path(root), sid, hook_input.get("tool_response"))
         log("ok" if ok else "skip", mode=mode, root=root, session_updated=ok)
         return
     if mode == "post-whoami":
-        context, meta = personalize_context(gen, root, hook_input)
+        context, meta = personalize_context(gen, root, hook_input, personal=inline_personal)
     elif mode == "node-enter":
         context, meta = "\n\n".join(node_context(gen, root, n) for n in nodes), {"node": "+".join(nodes), "event": event, "tool": tool}
     else:
@@ -859,7 +900,12 @@ def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
         identity_ok = view is not None and identity_matches_company(gen.read_session(sid, Path(root)), view)
         ready = view is not None and view.status == "bound" and bool(view.company_id)
         context, meta = map_context(gen, root, when, ask=(mode != "plain"), session_id=sid,
-                                    identity_allowed=identity_ok, company_ready=ready)
+                                    identity_allowed=identity_ok, company_ready=ready,
+                                    with_personal=inline_personal or mode == "plain")
+    if mode in ("first-prompt", "post-whoami", "compact") and host != "pi":
+        context, dropped = gen.fit_context(context)
+        if dropped:
+            meta = dict(meta, dropped=dropped)
     if mode == "first-prompt" and not marker_set(sid):
         return  # параллельный запуск уже доставил
     if mode == "node-enter":
@@ -877,7 +923,8 @@ def run(mode: str, hook_input: dict, *, host: str = "auto") -> None:
         if mode == "compact":
             node_markers_clear(sid)          # подкарты узлов ушли со сжатием — пустить снова
         for u in meta.get("units") or []:    # подкарты зоны уже в контексте — при входе не дублировать
-            node_marker_set(nkey, u)
+            if u not in (meta.get("dropped") or []):   # снятые лимитом придут при входе в узел
+                node_marker_set(nkey, u)
     if mode == "first-prompt":
         gc_markers()
 

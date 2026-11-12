@@ -11,7 +11,8 @@
 контекст: контекст приходит вместе с записью, которая к тому моменту уже выполнена.
 
 Типы и имена файлов — из `file_patterns` в YAML-шапках спецификаций: новые спецификации
-подключаются без изменения хука. Если подходят несколько, выдаются все. Первой идёт
+подключаются без изменения хука. Профиль одним файлом `{имя-фамилия}.md` имя не выдаёт: `.md` под
+`02_team/` с ключом `role` или `units` в шапке получает спецификацию с маской `employee.md`. Если подходят несколько, выдаются все. Первой идёт
 `00_general.md` — общие правила читаются до спецификации типа (README папки спецификаций).
 Обычно всё приходит одним отказом; не влезшее в BUDGET — следующим. Имена сравниваются без учёта
 регистра: на macOS и Windows `02_Active.md` — тот же файл.
@@ -701,7 +702,46 @@ def targets_of(hook_input: dict, root: str) -> list[str]:
     return out
 
 
-def specs_of(root: str, sdir: str, target: str, catalog: dict[str, list[str]]) -> list[str]:
+TEAM_DIR = "02_team"
+PROFILE_MASK = "employee.md"                    # спецификация профиля — та, что знает это имя
+PROFILE_HEAD_RE = re.compile(r"^(role|units)[ \t]*:", re.M)
+
+
+NOT_PROFILE_DIR_RE = re.compile(r"^(meetings|zz_.*|_.*|\d{4}-\d{2}-\d{2}.*)$")
+
+
+def _head(text: str) -> str:
+    text = text.lstrip("\ufeff")
+    if not text.startswith("---"):
+        return ""
+    end = text.find("\n---", 3)
+    return text[3:end] if end > 0 else ""
+
+
+def profile_by_head(parts: list[str], target: str, content: str | None) -> bool:
+    """Профиль одним файлом `{имя-фамилия}.md` (канон 2026-11-10): имя его не выдаёт, выдаёт место
+    и шапка — `.md` под `02_team/` с ключом `role` или `units`, кроме встреч, служебных `_*`/`zz_*`
+    и датированных папок. Шапка — из нового текста записи,
+    иначе из файла на диске; нет ни того, ни другого — не профиль."""
+    if not parts[-1].lower().endswith(".md") or parts[-1].lower() == "readme.md":
+        return False
+    lowered = [p.lower() for p in parts[:-1]]
+    if TEAM_DIR not in lowered:
+        return False
+    # Встречи, служебные папки и датированные материалы под 02_team/ — не профили, даже с `units`.
+    if any(NOT_PROFILE_DIR_RE.match(p) for p in lowered[len(lowered) - lowered[::-1].index(TEAM_DIR):]):
+        return False
+    if content is None:
+        try:
+            with open(target, encoding="utf-8-sig") as f:
+                content = f.read(4096)
+        except OSError:
+            return False
+    return bool(PROFILE_HEAD_RE.search(_head(content)))
+
+
+def specs_of(root: str, sdir: str, target: str, catalog: dict[str, list[str]],
+             content: str | None = None) -> list[str]:
     """Все подходящие спецификации цели записи с сохранением исключений пространства."""
     try:
         rel = os.path.relpath(target, root)
@@ -714,8 +754,12 @@ def specs_of(root: str, sdir: str, target: str, catalog: dict[str, list[str]]) -
         return []
     if any(a == "scaffold" and b == "templates" for a, b in zip(parts, parts[1:])):   # шаблоны в исходнике скилла
         return []
-    return [spec for spec, patterns in catalog.items()
-            if any(matches_pattern(parts, pattern) for pattern in patterns)]
+    found = [spec for spec, patterns in catalog.items()
+             if any(matches_pattern(parts, pattern) for pattern in patterns)]
+    if profile_by_head(parts, target, content):
+        found += [spec for spec, patterns in catalog.items()
+                  if PROFILE_MASK in patterns and spec not in found]
+    return found
 
 
 def _version(v: str) -> tuple[int, ...] | None:
@@ -786,8 +830,12 @@ def pre_write(hook_input: dict) -> None:
     key = session_key(hook_input)
     catalog = spec_catalog(sdir)
     files: dict[str, list[str]] = {}          # спецификация → файлы, которые под неё пишутся
-    for t in targets_of(hook_input, root):
-        for spec in specs_of(root, sdir, t, catalog):
+    ti = hook_input.get("tool_input") if isinstance(hook_input.get("tool_input"), dict) else {}
+    targets = targets_of(hook_input, root)
+    # Новый текст есть только у Write одного файла; у правок шапка читается с диска.
+    content = ti.get("content") if tool == "Write" and len(targets) == 1 and isinstance(ti.get("content"), str) else None
+    for t in targets:
+        for spec in specs_of(root, sdir, t, catalog, content):
             files.setdefault(spec, []).append(os.path.relpath(t, root))
     if not files:
         return

@@ -7,7 +7,8 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" first-prompt auto",
             "timeout": 15,
-            "statusMessage": "Карта пространства — в начале разговора"
+            "statusMessage": "Карта пространства — в начале разговора",
+            "additionalContextLimit": 5000
           },
           {
             "type": "command",
@@ -26,7 +27,22 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" post-whoami auto",
             "timeout": 15,
-            "statusMessage": "Карта вашей зоны — после входа в svaib"
+            "statusMessage": "Карта вашей зоны — после входа в svaib",
+            "additionalContextLimit": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" profile auto",
+            "timeout": 15,
+            "statusMessage": "Ваш профиль — после входа в svaib",
+            "additionalContextLimit": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" goals auto",
+            "timeout": 15,
+            "statusMessage": "Цели вашей зоны — после входа в svaib",
+            "additionalContextLimit": 5000
           }
         ]
       },
@@ -48,7 +64,8 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" node-enter auto",
             "timeout": 15,
-            "statusMessage": "Карта папки — при первом обращении к ней"
+            "statusMessage": "Карта папки — при первом обращении к ней",
+            "additionalContextLimit": 5000
           }
         ]
       }
@@ -61,7 +78,22 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" compact auto",
             "timeout": 15,
-            "statusMessage": "Карта пространства — после сжатия разговора"
+            "statusMessage": "Карта пространства — после сжатия разговора",
+            "additionalContextLimit": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" profile auto",
+            "timeout": 15,
+            "statusMessage": "Ваш профиль — после сжатия разговора",
+            "additionalContextLimit": 5000
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/inject_space_map.py\" goals auto",
+            "timeout": 15,
+            "statusMessage": "Цели вашей зоны — после сжатия разговора",
+            "additionalContextLimit": 5000
           },
           {
             "type": "command",

@@ -55,7 +55,7 @@ Management kit объекта: `01_overview` (обзор) · `02_active` (тек
 своего уровня · метрики → `03_metrics/` своего уровня · люди, профили, должности и найм →
 `02_team/` ближайшего management unit, где ведут работу с командой; такого нет — `01_company/02_team/` ·
 встречи management unit → его `meetings/` · курс, цели и стратегия компании →
-`01_company/` · личное CEO → `00_ceo/` · неразобранное → `_inbox/` ·
+`01_company/` · личное сотрудника → `_private/` его узла в `02_team/` · неразобранное → `_inbox/` ·
 правила работы агента на всё пространство, находки о расхождениях с каноном и служебное агента → `.svaib/`;
 учёт скиллов → `.svaib/usage/`.
 Вопрос уровня компании решается в `01_company/`, вопрос направления — в его папке.
@@ -659,8 +659,8 @@ def units_from_links(text: str, profile: Path, base: Path, units_all: list[str])
         except (OSError, RuntimeError):
             continue
         for unit in units_all:
-            unit_dir = (base / unit).resolve()
-            if resolved == unit_dir or (resolved.parent == unit_dir and resolved.name in ("01_overview.md", "README.md")):
+            udir = (base / unit).resolve()
+            if resolved == udir or (resolved.parent == udir and resolved.name in ("01_overview.md", "README.md")):
                 found.add(unit)
     return [unit for unit in units_all if unit in found]
 
@@ -680,7 +680,8 @@ def profile_units(base: Path, profile_path: str, units_all: list[str]) -> list[s
         text = p.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
-    found = [u for u in units_from_frontmatter(_frontmatter(text)) if u in units_all]
+    found = [unit_name(u) for u in units_from_frontmatter(_frontmatter(text))]
+    found = list(dict.fromkeys(u for u in found if u in units_all or ("/" in u and unit_dir(base, u))))
     if found:
         return found
     sections = re.split(r"^## ", text, flags=re.M)[1:]
@@ -756,39 +757,47 @@ def _read_workspace_file(base: Path, path: Path) -> str:
         return ""
 
 
-def is_ceo_profile(profile_path: str) -> bool:
-    return Path(profile_path).parts[:1] == ("00_ceo",)
+def unit_dir(base: Path, unit: str) -> Path | None:
+    """Папка юнита по относительному пути `sales` или `sales/b2b`; вне дерева,
+    через симлинк, в служебных и скрытых папках — нет юнита."""
+    parts = [x for x in unit.replace("\\", "/").strip("/").split("/") if x]
+    if not parts or any(x in (".", "..") or x.startswith(".") for x in parts):
+        return None
+    if parts[0] in ("zz_archive", "_inbox"):
+        return None
+    d = base
+    for x in parts:
+        d = d / x
+        if d.is_symlink() or not d.is_dir():
+            return None
+    return d
+
+
+def unit_name(unit: str) -> str:
+    return "/".join(x for x in unit.replace("\\", "/").strip("/").split("/") if x)
 
 
 def goals_context(base: Path, profile_path: str, units: list[str], source: str = "профиль") -> str:
-    """Известная часть цепочки: CEO → цели компании; профиль → юниты → их цели.
+    """Известная часть цепочки: профиль → юниты `units` → их цели. Цели компании
+    приходят так же — через `units: [01_company]`, а не по месту профиля.
 
     До цели вышестоящего юнита не идём: форма этой связи ещё не определена каноном.
     """
     base = base.resolve()
     parts = []
-    if is_ceo_profile(profile_path):
-        goal = base / "01_company" / "01_strategic" / "goal.md"
-        raw = _read_workspace_file(base, goal)
-        if raw:
-            content = _root_links(_goal_sections(raw), base, goal)
-            if content:
-                parts.append(f"**Компания** — источник `01_company/01_strategic/goal.md`:\n\n{content}")
-    elif source in ("профиль", "указаны"):
-        for unit in dict.fromkeys(units):
-            if unit in ("", ".", "..") or "/" in unit or "\\" in unit:
+    if source in ("профиль", "указаны"):
+        for unit in dict.fromkeys(unit_name(u) for u in units):
+            d = unit_dir(base, unit)
+            if d is None:
                 continue
-            unit_dir = base / unit
-            if not unit_dir.is_dir() or unit_dir.is_symlink():
-                continue
-            goal = unit_dir / "01_strategic" / "goal.md"
+            goal = d / "01_strategic" / "goal.md"
             raw = _read_workspace_file(base, goal)
             if raw:
                 content = _root_links(_goal_sections(raw), base, goal)
                 if content:
                     parts.append(f"**{unit}/** — источник `{unit}/01_strategic/goal.md`:\n\n{content}")
                     continue
-            overview = unit_dir / "01_overview.md"
+            overview = d / "01_overview.md"
             raw = _read_workspace_file(base, overview)
             if raw:
                 content = _root_links(_overview_goal_lines(raw), base, overview)
@@ -851,6 +860,125 @@ def preferences_line(prefs: str) -> str:
         return ""
     return ("\n\n**Как работать с пользователем** — его настройки в svaib; старшинство — `AGENTS.md`, "
             "раздел «Что дополняет эту инструкцию»:\n\n" + prefs)
+
+
+# Профиль подаётся разделами, которые задаёт шаблон профиля, — целиком; прочие разделы файла
+# (журналы, задачи, заметки) только называются. Источник списка — H2 шаблона в PROFILE_SPEC_SOURCE,
+# «<путь>@<коммит>»: тест `test_profile_sections_match_template` сверяет список с шаблоном,
+# гейт 7.7г сборщика — коммит с историей шаблона. Сменился шаблон — сверь список и обнови коммит.
+PROFILE_SPEC_SOURCE = "skills/space-scaffold/templates/aspects/02_team/employee.md@cfa3db56"
+PROFILE_SECTIONS = ("Кто я", "Роль и зона ответственности", "Ценности и смыслы", "Цели и видение",
+                    "Зачем мне эта работа", "Как думаю и работаю", "Контекст")
+PROFILE_LIMIT = 8000
+PROFILE_EXAMPLE_RE = re.compile(r"^\s*>\s*(\*\*)?Пример", re.I)
+PROFILE_PLACEHOLDER_RE = re.compile(r"^\s*\{[^{}]*\}\s*$")
+
+
+def _plain_head(head: str) -> str:
+    return re.sub(r"^[^\wА-Яа-яЁё]+", "", head).strip()
+
+
+def _head_words(head: str) -> set:
+    return set(re.findall(r"[a-zа-я0-9]+", head.lower().replace("ё", "е")))
+
+
+def profile_section(head: str):
+    """Раздел шаблона, которому отвечает заголовок профиля: все слова заголовка шаблона есть
+    в заголовке профиля — эмодзи и вставки («Как я думаю и работаю») не мешают."""
+    words = _head_words(head)
+    return next((s for s in PROFILE_SECTIONS if _head_words(s) <= words), None)
+
+
+def _profile_body(base: Path, p: Path, body: str) -> str:
+    """Тело раздела без примеров и заглушек шаблона; H3 — жирной строкой, ссылки — от корня."""
+    out, in_example = [], False
+    for line in body.split("\n"):
+        if PROFILE_EXAMPLE_RE.match(line):
+            in_example = True
+            continue
+        if in_example and line.lstrip().startswith(">"):
+            continue
+        in_example = False
+        if line.strip() == "---" or PROFILE_PLACEHOLDER_RE.match(line):
+            continue
+        out.append(re.sub(r"^\s{0,3}#{3,6}\s+(.+?)\s*$", r"**\1**", line))
+    text = "\n".join(out)
+    return re.sub(r"\]\((?!https?:|#|/)([^)\s#]+)(#[^)\s]*)?\)",
+                  lambda m: f"]({_root_rel(base, p.parent / m.group(1))}{m.group(2) or ''})", text).strip()
+
+
+def _root_rel(base: Path, target: Path) -> str:
+    """Ссылка профиля — от корня пространства: в контексте агента у неё нет папки-основы."""
+    try:
+        return os.path.relpath(target.resolve(), base).replace(os.sep, "/")
+    except ValueError:
+        return str(target)
+
+
+def profile_excerpt(base: Path, profile_path: str) -> str:
+    """Профиль для контекста: разделы шаблона (`PROFILE_SECTIONS`) целиком, в порядке файла;
+    прочие разделы — только по названию. Профиля нет, он вне пространства или разделов
+    шаблона в нём нет — пусто."""
+    if not profile_path:
+        return ""
+    base = base.resolve()
+    p = (base / profile_path).resolve()
+    if base not in p.parents or not p.is_file():
+        return ""
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff")
+    except OSError:
+        return ""
+    if _frontmatter(text):
+        text = text[text.find("\n---", 3) + 4:]
+    taken, seen, rest = [], set(), []
+    for sec in re.split(r"^## ", text, flags=re.M)[1:]:
+        head, _, body = sec.partition("\n")
+        plain = _plain_head(head)
+        spec = profile_section(plain)
+        if spec and spec not in seen:
+            seen.add(spec)
+            body = _profile_body(base, p, body)
+            if body:
+                taken.append(f"**{plain}**\n\n{body}")
+        else:
+            rest.append(plain)
+    if not taken:
+        return ""
+    excerpt = clean_block("\n\n".join(taken), PROFILE_LIMIT)
+    tail = ""
+    if excerpt.endswith(" …"):
+        tail = "\n\nПрофиль обрезан — полный текст в файле."
+    elif rest:
+        tail = f"\n\nДругие разделы файла: {' · '.join(rest)} — в контекст не подаются, читай файл, когда нужно."
+    return f"\n\n**Профиль пользователя** — `{profile_path}`:\n\n{excerpt}{tail}"
+
+
+# Одна строка контекста хука: Claude Code больше 10 000 знаков не подаёт — кладёт в файл и даёт
+# модели превью на 2 000; Codex по умолчанию режет на 2 500 токенов (поднято `additionalContextLimit`
+# в hooks.json). Запас — под подсказку онбординга, которую добавляет хук.
+CONTEXT_LIMIT = 9000
+NODE_SECTION_RE = re.compile(r"\n+## Карта узла\n\n\*\*(.+?)/\*\*.*?(?=\n## |\Z)", re.S)
+
+
+def fit_context(text: str, limit: int = CONTEXT_LIMIT) -> tuple[str, list[str]]:
+    """Текст карты в лимит одной строки контекста. Первыми снимаются подкарты узлов зоны, с конца:
+    они придут сами при первом обращении к узлу. Не хватило — обрезка с пометкой.
+    Возвращает текст и снятые узлы — их не помечают доставленными."""
+    dropped: list[str] = []
+    while len(text) > limit:
+        found = list(NODE_SECTION_RE.finditer(text))
+        if not found:
+            break
+        m = found[-1]
+        dropped.insert(0, m.group(1))
+        text = text[:m.start()] + text[m.end():]
+    if dropped:
+        text += ("\n\nПодкарты " + " · ".join(f"`{u}/`" for u in dropped)
+                 + " не вошли в лимит контекста — придут при первом обращении к узлу.")
+    if len(text) > limit:
+        text = text[:limit - 120].rstrip() + "\n\n… контекст обрезан лимитом — остальное читай в файлах."
+    return text, dropped
 
 
 def space_rules(base: Path) -> str:
@@ -1036,19 +1164,24 @@ def onboarding_block(rec: dict) -> str:
             return title(s) + (f" ({note})" if note else "")
 
         lines = ["\n\n**Онбординг пользователя:**"]
+        if all(sid in catalog for sid in initial):
+            initial_done = all(isinstance(marks.get(sid), dict) and marks[sid].get("state") == "done"
+                               for sid in initial)
+            lines.append("- начальные этапы: " + ("завершены" if initial_done else "не завершены"))
         if done:
             lines.append("- пройдено: " + ", ".join(
                 title(s) + (f" (зачтён по `{src}`)" if src != s["id"] else "") for s, src in done))
         if nxt:
             lines.append("- дальше: " + "; ".join(todo(s) for s in nxt))
+        lines.append("- это выборка; отсутствие этапа в ней не означает отсутствие отметки")
         lines.append("- весь путь — скилл `onboarding`")
         return "\n".join(lines)
     except Exception:  # noqa: BLE001 — блок онбординга не имеет права уронить карту
         return ""
 
 
-def personalize(base: Path, who: dict, units_override: list[str] | None = None) -> tuple[str, dict]:
-    """После whoami: юниты зоны и подкарты; возвращает текст и запись сессии."""
+def zone_units(base: Path, who: dict, units_override: list[str] | None = None) -> tuple[list[str], str]:
+    """Юниты зоны пользователя и откуда они: `units` профиля, затем `about`, либо указанные."""
     base = base.resolve()
     units_all = [u.name for u in subdirs(base) if u.name not in ("zz_archive", "_inbox")]
     units = profile_units(base, who.get("profile_path", ""), units_all)
@@ -1057,9 +1190,18 @@ def personalize(base: Path, who: dict, units_override: list[str] | None = None) 
         units = units_in_text(who["about"], units_all)
         source = "about"
     if units_override:
-        units = [u.strip().strip("/") for u in units_override if u.strip()]
+        units = [unit_name(u.strip()) for u in units_override if u.strip()]
         source = "указаны"
-    units = [u for u in units if u in units_all]
+    return list(dict.fromkeys(u for u in units if u in units_all or unit_dir(base, u))), source
+
+
+def personalize(base: Path, who: dict, units_override: list[str] | None = None,
+                personal: bool = True) -> tuple[str, dict]:
+    """После whoami: юниты зоны и подкарты; возвращает текст и запись сессии.
+    `personal=False` — профиль и цели подают отдельные команды хука (лимит одной строки контекста)."""
+    base = base.resolve()
+    units_all = [u.name for u in subdirs(base) if u.name not in ("zz_archive", "_inbox")]
+    units, source = zone_units(base, who, units_override)
     rec = {"subject": who["subject"], "name": who.get("name", ""), "preferences": who.get("preferences", ""),
            "tenant": who.get("tenant", ""), "role": who.get("role", ""),
            "company_id": who.get("company_id", ""), "account_id": who.get("account_id", ""),
@@ -1068,23 +1210,20 @@ def personalize(base: Path, who: dict, units_override: list[str] | None = None) 
     lines = [f"{who_line(who['subject'], who.get('name', ''))}, профиль "
              f"`{who.get('profile_path') or '—'}` — персональная подкарта зоны этой сессии."
              f"{keyboard_line(who.get('name', ''))}{onboarding_block(rec)}"
-             f"{preferences_line(who.get('preferences', ''))}"]
+             f"{preferences_line(who.get('preferences', ''))}"
+             f"{profile_excerpt(base, who.get('profile_path', '')) if personal else ''}"]
     if units:
         lines.append(f"\n**Management units зоны** ({source}): " + " · ".join(f"`{u}/`" for u in units))
-        goals = goals_context(base, who.get("profile_path", ""), units, source)
+        goals = goals_context(base, who.get("profile_path", ""), units, source) if personal else ""
         if goals:
             lines.append("\n" + goals)
         for u in units:
             lines.append("\n" + node_map(base / u, base))
     else:
-        if not is_ceo_profile(who.get("profile_path", "")):
-            lines.append("\nManagement units зоны не выведены ни из профиля, ни из `about`. Персональной подкарты нет: "
-                         "работай по общей карте — подкарта узла приходит при первом обращении к его файлам "
-                         f"(папки верхнего уровня: {', '.join(units_all)}). Точный источник зоны — поле "
-                         "`units:` в шапке профиля.")
-        goals = goals_context(base, who.get("profile_path", ""), units, source)
-        if goals:
-            lines.append("\n" + goals)
+        lines.append("\nManagement units зоны не выведены ни из профиля, ни из `about`. Персональной подкарты нет: "
+                     "работай по общей карте — подкарта узла приходит при первом обращении к его файлам "
+                     f"(папки верхнего уровня: {', '.join(units_all)}). Точный источник зоны — поле "
+                     "`units:` в шапке профиля.")
     return "\n".join(lines), rec
 
 
@@ -1102,9 +1241,10 @@ def emit_text(base: Path, focus: list[str] | None = None, no_model: bool = False
     date = date or datetime.date.today().isoformat()
     units = [u for u in subdirs(base) if u.name not in ("zz_archive", "_inbox")]
     names = {u.name for u in units}
-    focus = [f for f in (focus or []) if f]
-    zone_maps = [node_map(u, base) for u in units if u.name in focus]
-    missing = [f for f in focus if f not in names]
+    focus = list(dict.fromkeys(unit_name(f) for f in (focus or []) if f))
+    present = [f for f in focus if f in names or ("/" in f and unit_dir(base, f))]
+    zone_maps = [node_map(base / f, base) for f in present]
+    missing = [f for f in focus if f not in present]
     root_named = [f for f in md_files(base) if f.name not in ("CLAUDE.md", "AGENTS.md")][:8]
     listed = len(root_named) + sum(count_addresses(z) for z in zone_maps)
     parts = [root_map(base, date, coverage=coverage_line(base, units, listed), emit=True,
@@ -1120,7 +1260,7 @@ def emit_text(base: Path, focus: list[str] | None = None, no_model: bool = False
         if scout_enabled():   # тот же флаг, что у --print-model — единый источник
             parts.append(SCOUT_BLOCK)
     if zone_maps:
-        zone = " · ".join(f"`{f}/`" for f in focus if f in names)
+        zone = " · ".join(f"`{f}/`" for f in present)
         parts.append(f"**Зона ответственности пользователя** — {zone}. Подробные карты этих "
                      "management units — ниже; по вопросу из зоны адрес бери отсюда.")
         parts.extend(zone_maps)

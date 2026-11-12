@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { kimiToolPayload } from "./kimi-schema.ts";
+import { modelVisibleMcpResult } from "./mcp-result.ts";
 import { usageSnapshot } from "./usage-snapshot.ts";
 import { registerDelegation } from "./delegation.ts";
 import { Type } from "typebox";
@@ -169,9 +170,10 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
   });
 
   pi.on("tool_result", async (event, ctx) => {
+    const visible = modelVisibleMcpResult(event);
     // A failed whoami is never identity. update_me conflicts can carry the
     // current onboarding object, which the shared hook knows how to merge.
-    if (event.isError && !/^mcp__(?:svaib|plugin_svaib_svaib)__update_me$/.test(event.toolName)) return;
+    if (event.isError && !/^mcp__(?:svaib|plugin_svaib_svaib)__update_me$/.test(event.toolName)) return visible;
     const result = await bridge("node-enter", ctx, {
       hook_event_name: "PostToolUse", tool_name: event.toolName, tool_input: event.input,
       tool_use_id: event.toolCallId,
@@ -183,6 +185,7 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
     if (map) pi.sendMessage({ customType: "svaib-pi-tool-context", content: map, display: false }, {
       deliverAs: "steer", triggerTurn: false,
     });
+    return visible;
   });
 
   pi.on("message_end", event => {
