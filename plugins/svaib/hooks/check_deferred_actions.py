@@ -128,6 +128,14 @@ def get_last_turn_text(transcript_path: str, turn_id: str | None = None) -> str 
     return "\n".join(parts) if parts else None
 
 
+def in_svaib_space(hook_input: dict) -> bool:
+    try:
+        import inject_space_map
+        return inject_space_map.resolve_root(hook_input) is not None
+    except Exception:
+        return False
+
+
 def main():
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
@@ -141,6 +149,10 @@ def main():
         sys.exit(0)
 
     if hook_input.get("stop_hook_active"):
+        sys.exit(0)
+
+    # Вне пространства svaib (нет `.svaib/`) хук молчит: корень — тот же, что у карты и спецификаций.
+    if not in_svaib_space(hook_input):
         sys.exit(0)
 
     # turn_id — штатное расширение события Codex. Claude оставляем на прежней

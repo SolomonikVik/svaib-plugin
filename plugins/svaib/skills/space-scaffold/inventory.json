@@ -1,6 +1,6 @@
 {
   "plugin": "svaib",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "skills": [
     "content-update",
     "metrics-intake",
@@ -78,6 +78,10 @@
         "Stop",
         "UserPromptSubmit"
       ]
+    },
+    {
+      "script": "pi_paths.py",
+      "events": []
     },
     {
       "script": "space_map.py",

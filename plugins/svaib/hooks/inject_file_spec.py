@@ -12,7 +12,7 @@
 
 Типы и имена файлов — из `file_patterns` в YAML-шапках спецификаций: новые спецификации
 подключаются без изменения хука. Профиль одним файлом `{имя-фамилия}.md` имя не выдаёт: `.md` под
-`02_team/` с ключом `role` или `units` в шапке получает спецификацию с маской `employee.md`. Если подходят несколько, выдаются все. Первой идёт
+`00_команда/` (до переезда на 5.0 — `02_team/`) с ключом `role` или `units` в шапке получает спецификацию с маской `employee.md`. Если подходят несколько, выдаются все. Первой идёт
 `00_general.md` — общие правила читаются до спецификации типа (README папки спецификаций).
 Обычно всё приходит одним отказом; не влезшее в BUDGET — следующим. Имена сравниваются без учёта
 регистра: на macOS и Windows `02_Active.md` — тот же файл.
@@ -71,7 +71,7 @@ SPEC_DIR_CANDIDATES = (
 # проекты. Служебную папку заводит миграция структуры вместе с плагином.
 SPACE_MARK = ".svaib"
 GENERAL = "00_general.md"
-SKIP_DIRS = {"_templates", "zz_archive", "node_modules"}          # шаблоны и архив — не рабочие файлы
+SKIP_DIRS = {"_templates", "_архив", "zz_archive", "node_modules"}          # шаблоны и архив — не рабочие файлы
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch"}
 REDIRECTS = {">", ">>", ">|", "&>", "&>>"}
 SEPARATORS = {"|", "||", "&&", ";", "&", "(", ")"}
@@ -702,7 +702,7 @@ def targets_of(hook_input: dict, root: str) -> list[str]:
     return out
 
 
-TEAM_DIR = "02_team"
+TEAM_DIRS = ("00_команда", "02_team")           # 5.0 и имя 4.x — до переезда живых пространств
 PROFILE_MASK = "employee.md"                    # спецификация профиля — та, что знает это имя
 PROFILE_HEAD_RE = re.compile(r"^(role|units)[ \t]*:", re.M)
 
@@ -720,16 +720,17 @@ def _head(text: str) -> str:
 
 def profile_by_head(parts: list[str], target: str, content: str | None) -> bool:
     """Профиль одним файлом `{имя-фамилия}.md` (канон 2026-11-10): имя его не выдаёт, выдаёт место
-    и шапка — `.md` под `02_team/` с ключом `role` или `units`, кроме встреч, служебных `_*`/`zz_*`
+    и шапка — `.md` под `00_команда/` или `02_team/` с ключом `role` или `units`, кроме встреч, служебных `_*`/`zz_*`
     и датированных папок. Шапка — из нового текста записи,
     иначе из файла на диске; нет ни того, ни другого — не профиль."""
     if not parts[-1].lower().endswith(".md") or parts[-1].lower() == "readme.md":
         return False
     lowered = [p.lower() for p in parts[:-1]]
-    if TEAM_DIR not in lowered:
+    team = [i for i, p in enumerate(lowered) if p in TEAM_DIRS]
+    if not team:
         return False
-    # Встречи, служебные папки и датированные материалы под 02_team/ — не профили, даже с `units`.
-    if any(NOT_PROFILE_DIR_RE.match(p) for p in lowered[len(lowered) - lowered[::-1].index(TEAM_DIR):]):
+    # Встречи, служебные папки и датированные материалы под папкой команды — не профили, даже с `units`.
+    if any(NOT_PROFILE_DIR_RE.match(p) for p in lowered[team[-1] + 1:]):
         return False
     if content is None:
         try:

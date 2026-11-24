@@ -50,6 +50,10 @@ def _svaib_directory(path: str) -> bool:
         raise ValueError("workspace_boundary_invalid") from error
     if not stat.S_ISDIR(mode):
         raise ValueError("workspace_boundary_invalid")
+    # BB keeps runtime data under ~/.svaib/workplace even without a workspace.
+    if _same(path, os.path.expanduser("~")):
+        return any(os.path.isfile(os.path.join(path, ".svaib", marker))
+                   for marker in ("space.json", "platform.json", "README.md"))
     return True
 
 
@@ -67,18 +71,13 @@ def find_svaib_root(start: str) -> str | None:
 
 
 def find_root(start: str) -> str | None:
-    """Ближайшая `.svaib/`; только без неё — самый верхний CLAUDE.md/AGENTS.md."""
+    """Ближайшая `.svaib/` — признак пространства svaib. Без неё корня нет: плагин стоит у
+    человека во всех папках, а пространство svaib — только там, где есть `.svaib/`;
+    в чужом проекте с CLAUDE.md или AGENTS.md хуки молчат."""
     try:
-        space = find_svaib_root(start)
+        return find_svaib_root(start)
     except ValueError:
         return None
-    if space is not None:
-        return space
-    found = None
-    for path in _walk_up(start):
-        if has_root_marker(path):
-            found = path
-    return found
 
 
 def _same(a: str, b: str) -> bool:
@@ -99,8 +98,8 @@ def _workspace_folders() -> list[str]:
 
 
 def workspace_root(on_ambiguous: Callable[[int, int, list[str]], None] | None = None) -> str | None:
-    """Одна папка: с маркером — корень как есть (агенту Cowork доступна только она), без маркера —
-    подъём к корню. Несколько папок: пространство — та, где лежит `.svaib/`, остальные просто
+    """Одна папка внутри пространства: с маркером — корень как есть (агенту Cowork доступна только
+    она), без маркера — ближайшая `.svaib/`; вне пространства корня нет. Несколько папок: пространство — та, где лежит `.svaib/`, остальные просто
     подключены; ни одной или больше одной — корня нет."""
     folders = _workspace_folders()
     try:
@@ -108,7 +107,11 @@ def workspace_root(on_ambiguous: Callable[[int, int, list[str]], None] | None = 
             path = folders[0]
             if _svaib_directory(path):
                 return path
-            return path if has_root_marker(path) else find_root(path)
+            space = find_svaib_root(path)
+            if space is None:
+                return None
+            # подпапка пространства с маркером — корень как есть: агенту Cowork доступна только она
+            return path if has_root_marker(path) else space
         spaces = [path for path in folders if _svaib_directory(path)]
     except ValueError:
         return None
@@ -135,8 +138,7 @@ def resolve_root(hook_input: dict, on_ambiguous: Callable[[int, int, list[str]],
                  *, use_claude_env: bool = True) -> str | None:
     """Корень сессии. Cowork с подключёнными папками — их ответ окончательный, отказ тоже:
     служебные CLAUDE_PROJECT_DIR и cwd привели бы к чужому маркеру. Иначе исходный каталог
-    CLAUDE_PROJECT_DIR задаёт сессию: ближайшая `.svaib/` важнее AGENTS-маркера подпапки.
-    Только без `.svaib/` сохраняется навигационный fallback по маркерам.
+    CLAUDE_PROJECT_DIR задаёт сессию: корень — ближайшая `.svaib/`; без неё корня нет.
     Codex передаёт use_claude_env=False: окружение Claude не определяет его пространство."""
     if not isinstance(hook_input, dict):
         return None
@@ -148,11 +150,7 @@ def resolve_root(hook_input: dict, on_ambiguous: Callable[[int, int, list[str]],
             space = find_svaib_root(project)
         except ValueError:
             return None
-        if space is not None:
-            return space
-        if has_root_marker(project):
-            return project
-        return find_root(project)
+        return space
     start = hook_input.get("cwd") or os.getcwd()
     if not isinstance(start, str) or "\0" in start:
         return None

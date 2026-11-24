@@ -1,6 +1,7 @@
-import { statSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 
 type Stamp = [string, string | null, string | null];
+type BoundaryStamp = [string, number | null];
 type Part = { kind: string; text: string };
 
 /** One current projection, reinserted for every Pi context transformation.
@@ -11,8 +12,16 @@ export class MapContext {
   private main = new Map<string, string>();
   private nodes = new Map<string, string>();
   private sources = new Map<string, Stamp>();
+  private boundaries: BoundaryStamp[] = [];
+  ready = false;
 
-  clear() { this.main.clear(); this.nodes.clear(); this.sources.clear(); }
+  clear() {
+    this.main.clear();
+    this.nodes.clear();
+    this.sources.clear();
+    this.boundaries = [];
+    this.ready = false;
+  }
   get nodeIds() { return [...this.nodes.keys()]; }
   get text() { return [...["map", "profile", "goals"].map(k => this.main.get(k)).filter(Boolean), ...this.nodes.values()].join("\n\n"); }
 
@@ -25,10 +34,19 @@ export class MapContext {
     }).map(([path]) => path);
   }
 
-  apply(result: { parts?: Part[]; sourceStamp?: Stamp[] }, refreshed = false) {
+  boundaryChanged(): boolean {
+    return this.boundaries.some(([path, kind]) => {
+      const stat = /[/\\]\.svaib$/.test(path) ? lstatSync : statSync;
+      try { return (stat(path).mode & 0o170000) !== kind; }
+      catch (error) { return ((error as NodeJS.ErrnoException).code === "ENOENT" ? null : -1) !== kind; }
+    });
+  }
+
+  apply(result: { parts?: Part[]; sourceStamp?: Stamp[]; boundaryStamp?: BoundaryStamp[] }, refreshed = false) {
     const parts = result.parts || [];
+    if (refreshed) this.clear();
+    if (result.boundaryStamp) { this.boundaries = result.boundaryStamp; this.ready = true; }
     if (parts.some(p => p.kind === "map")) this.main.clear();
-    if (refreshed) { this.nodes.clear(); this.sources.clear(); }
     for (const part of parts) {
       if (part.kind !== "nodes") { this.main.set(part.kind, part.text); continue; }
       for (const text of part.text.split(/(?=## Подкарта узла `)/)) {
@@ -36,7 +54,11 @@ export class MapContext {
         if (node) this.nodes.set(node, text.trim());
       }
     }
-    for (const stamp of result.sourceStamp || []) this.sources.set(stamp[0], stamp);
+    // A node read can occur just after a tool changes a source. Keep the
+    // original stamp until the full snapshot has had a chance to refresh.
+    for (const stamp of result.sourceStamp || []) {
+      if (!this.sources.has(stamp[0])) this.sources.set(stamp[0], stamp);
+    }
   }
 }
 

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { kimiToolPayload } from "./kimi-schema.ts";
-import { modelVisibleMcpResult } from "./mcp-result.ts";
+import { identityDetails, identityHistory, identityTool, modelVisibleMcpResult } from "./mcp-result.ts";
 import { usageSnapshot } from "./usage-snapshot.ts";
 import { registerDelegation } from "./delegation.ts";
 import { MapContext, hasContext } from "./map-context.ts";
@@ -31,7 +31,7 @@ async function python(script: string, args: string[], input: unknown, signal?: A
     delete env.CLAUDE_PLUGIN_ROOT;
     delete env.CLAUDE_PROJECT_DIR;
     delete env.CLAUDE_CODE_IS_COWORK;
-    const child = spawn(process.env.SVAIB_PYTHON || "python3", [resolve(root, "hooks", script), ...args], {
+    const child = spawn(process.env.SVAIB_PYTHON || "python3", ["-B", resolve(root, "hooks", script), ...args], {
       stdio: ["pipe", "pipe", "pipe"], env,
     });
     let stdout = "", bytes = 0, settled = false;
@@ -116,6 +116,7 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
   let request = 0;
   let generation = 0;
   let contextHash = "";
+  let outgoingTree: ReturnType<typeof nativeEvent> | undefined;
   const updateMap = async (mode: string, ctx: ExtensionContext, extra = {}, refreshed = false) => {
     const eventId = randomUUID();
     const result = await bridge(mode, ctx, { ...extra, request_id: request, event_id: eventId });
@@ -151,14 +152,25 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
     map.clear();
     contextKey = "";
   };
-  pi.on("session_start", (event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
     restoreBranch(event, ctx);
     ctx.ui.setStatus("svaib", `svaib ${packageVersion} · Pi`);
     pi.events.emit("subagent:acknowledge-extension", { id: "svaib-policy" });
+    if (!options.child && event.reason === "fork") await bridge("usage-fork", ctx);
   });
   // /tree changes the active branch without restarting the extension. Never
   // carry specification access or Stop state from an abandoned branch.
-  pi.on("session_tree", restoreBranch);
+  pi.on("session_before_tree", (_event, ctx) => {
+    if (!options.child) outgoingTree = nativeEvent(ctx, { native_entries: usageSnapshot(ctx.sessionManager.getBranch()) });
+  });
+  pi.on("session_tree", async (event, ctx) => {
+    const outgoing = outgoingTree;
+    outgoingTree = undefined;
+    restoreBranch(event, ctx);
+    if (outgoing && outgoing.leaf_id === event.oldLeafId) {
+      await python("bridge_pi.py", ["usage-branch"], outgoing);
+    }
+  });
 
   pi.on("agent_start", async (_event, ctx) => {
     latestText = "";
@@ -167,7 +179,10 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
       map.clear();
       contextKey = key;
       await bridge("reset-specs", ctx);
-      const initial = await updateMap("first-prompt", ctx);
+      const sessionCwd = ctx.sessionManager.getHeader()?.cwd ?? ctx.cwd;
+      const history = options.child ? undefined : identityHistory(ctx.sessionManager.getBranch())
+        .filter(result => result.scope || sessionCwd === ctx.cwd);
+      const initial = await updateMap("first-prompt", ctx, { identity_history: history });
       if (!initial.parts?.some((part: any) => part.kind === "map")) {
         await updateMap("compact", ctx, {}, true);
       }
@@ -177,7 +192,7 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
 
   pi.on("session_compact", () => { resetSpecs = true; });
   // Runs for automatic compaction/overflow recovery inside a turn too.
-  pi.on("context", async (event, ctx) => {
+  pi.on("context_with_system", async (event, ctx) => {
     if (ctx.signal?.aborted) return;
     request++;
     // agent_start can precede persistence of the incoming user entry in BB.
@@ -190,7 +205,7 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
     const changed = map.changed();
     if (changed.length) journal("source-invalidation", ctx, { request_id: request, generation,
       changed_count: changed.length, binding_changed: changed.some(path => /[/\\]\.svaib[/\\]platform\.json$/.test(path)) });
-    if (changed.some(path => /[/\\]\.svaib[/\\]platform\.json$/.test(path))) {
+    if (map.boundaryChanged() || changed.some(path => /[/\\]\.svaib[/\\]platform\.json$/.test(path))) {
       map.clear();
       resetSpecs = true;
     }
@@ -199,16 +214,22 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
       // Re-open node maps lost to compaction. Identity is read from shared state.
       await updateMap("compact", ctx, {}, true);
       resetSpecs = false;
-    } else if (!map.text || changed.length) {
+    } else if (!map.ready || changed.length) {
       await updateMap("refresh", ctx, { context_nodes: map.nodeIds }, true);
     }
+    const messages = event.messages.filter(message => message.role !== "custom" || !oldContextTypes.has(message.customType));
     const text = map.text;
-    if (!text) return;
+    const start = messages.findIndex(message => message.role !== "system");
+    if (!text || start < 0) return messages.length === event.messages.length ? undefined : { messages };
     journal("emission", ctx, { request_id: request, generation, hash: contextHash, chars: text.length,
       confirmation: "context-transform-returned; provider observation logged separately" });
-    return { messages: [...event.messages.filter((m: any) => !oldContextTypes.has(m.customType)), {
-      role: "custom", customType: contextType, content: text, display: false, timestamp: Date.now(),
-    }] };
+    // Pi maps custom blocks to the user role. Keep the workspace data at that
+    // priority, in a stable position before the conversation and its tool results.
+    const context = "Служебный контекст пространства от svaib, подан автоматически. Правила компании для агента и личные настройки применяй в границах поручения.\n\n" + text;
+    messages.splice(start, 0, {
+      role: "custom", customType: contextType, content: context, display: false, timestamp: messages[start].timestamp,
+    });
+    return { messages };
   });
 
   pi.on("tool_call", async (event, ctx) => {
@@ -236,14 +257,18 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
     // Match the registered PostToolUse events, rather than starting Python for
     // unrelated write/delegation results that the shared map handler ignores.
     if (!nodeEventTools.has(event.toolName)
-        && !/^mcp__(?:svaib|plugin_svaib_svaib)__(?:whoami|update_me)$/.test(event.toolName)) return visible;
-    await updateMap("node-enter", ctx, {
+        && !identityTool.test(event.toolName)) return visible;
+    const result = await updateMap("node-enter", ctx, {
       hook_event_name: "PostToolUse", tool_name: event.toolName, tool_input: event.input,
       tool_use_id: event.toolCallId,
       // Pi's structuredContent is the full original MCP CallToolResult, one
       // envelope above the server's own structuredContent. Avoid nesting again.
       tool_response: event.structuredContent ?? { content: event.content },
     });
+    if (result.identityScope) {
+      return { ...visible, details: identityDetails(result.identityScope, event.details,
+        event.structuredContent, visible?.content ?? event.content) };
+    }
     return visible;
   });
 
@@ -255,7 +280,7 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
     if (!current.prompt_id || stopPrompt === current.prompt_id || ctx.signal?.aborted) return;
     const result = await python("check_deferred_actions.py", [], {
       // The shared hook accepts a native current-turn text via this neutral field pair.
-      turn_id: current.prompt_id, last_assistant_message: latestText, stop_hook_active: false,
+      turn_id: current.prompt_id, last_assistant_message: latestText, stop_hook_active: false, cwd: current.cwd,
     }, ctx.signal);
     if (result.decision !== "block") return;
     stopPrompt = current.prompt_id;
@@ -269,7 +294,7 @@ export default function svaib(pi: ExtensionAPI, options: { child?: boolean } = {
 
   pi.registerTool({
     name: "svaib_scout", label: "Скаут svaib",
-    description: "Изолированный поиск места и факта в пространстве. Передай вопрос, известные адреса и границу поиска. Возвращает выжимку с адресами.",
+    description: "Изолированный поиск места и факта в пространстве. Передай вопрос, известные адреса и границу поиска. Возвращает сводку с адресами.",
     parameters: Type.Object({ task: Type.String({ minLength: 1 }) }),
     async execute(_id, { task }, signal, _onUpdate, ctx) {
       if (!ctx.model) throw new Error("svaib: select a model before using the scout");

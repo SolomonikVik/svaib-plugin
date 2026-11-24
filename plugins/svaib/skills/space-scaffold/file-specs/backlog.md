@@ -1,7 +1,7 @@
 ---
 title: "Тип backlog — будущая работа"
 status: draft
-file_patterns: ["[0-9][0-9]_backlog.md"]
+file_patterns: ["_планы.md", "[0-9][0-9]_backlog.md"]
 ---
 
 # Спецификация типа `backlog` — отложенное
@@ -10,7 +10,7 @@ file_patterns: ["[0-9][0-9]_backlog.md"]
 
 ## Миссия
 
-Файл вида `03_backlog.md`. Хранит работу, которая важна, но не находится в текущем активе: задачи, проекты, идеи и гипотезы на потом. Разгружает [active](active.md), чтобы текущий фокус не смешивался с будущей работой ([management-kit:68–81](https://github.com/SolomonikVik/svaib/blob/v0.11.0/product/methodology/space/scaffold/management-kit.md#L68)).
+Файл вида `_планы.md`. Хранит работу, которая важна, но не находится в текущем активе: задачи, проекты, идеи и гипотезы на потом. Разгружает [active](active.md), чтобы текущий фокус не смешивался с будущей работой ([management-kit:71–84](https://github.com/SolomonikVik/svaib/blob/v0.11.0/product/methodology/space/scaffold/management-kit.md#L71)).
 
 **Граница:** не актив и не архив.
 
@@ -18,7 +18,7 @@ file_patterns: ["[0-9][0-9]_backlog.md"]
 
 ## Структура секций
 
-По [templates/management-kit/03_backlog.md](../templates/management-kit/03_backlog.md):
+По [templates/management-kit/_планы.md](../templates/management-kit/_%D0%BF%D0%BB%D0%B0%D0%BD%D1%8B.md):
 
 1. **План** — задачи и проекты, сгруппированные по фокусам, вехам, темам или приоритетам: `### {Фокус / веха}` → `- [ ] Задача` → подзадачи, вложенность любая.
 2. **Идеи и гипотезы** — сырой материал, который ещё нужно обдумать перед постановкой в работу: `- [ ] {Идея — источник / дата}`.

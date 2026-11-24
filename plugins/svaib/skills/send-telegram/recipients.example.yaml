@@ -26,8 +26,8 @@ bot:
 
 people:
   - alias: person-a
-    # Путь от корня базы. Канон scaffold — плоский файл {unit}/02_team/{slug}.md.
-    person_ref: 01_company/02_team/person-a.md
+    # Путь от корня базы. Канон scaffold — плоский файл {unit}/00_команда/{slug}.md.
+    person_ref: 00_компания/00_команда/person-a.md
     chat_id_ref: TG_CHAT_PERSON_A
 
 groups:

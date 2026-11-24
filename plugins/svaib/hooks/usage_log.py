@@ -154,7 +154,7 @@ def state_of(session_id: str):
         def save():
             f.seek(0)
             f.truncate()
-            if any(state.get(k) for k in ("runs", "launch", "agents_seen", "no_flush")):
+            if any(state.get(k) for k in ("runs", "launch", "agents_seen", "no_flush", "pi_launches", "pi_receipts")):
                 f.write(json.dumps(state, ensure_ascii=False))
             f.flush()
 
@@ -187,7 +187,7 @@ def sweep_state(current: str) -> None:
                 runs = state if isinstance(state, list) else state.get("runs") or []
                 launch = None if isinstance(state, list) else state.get("launch")
                 last = runs[-1] if runs and isinstance(runs[-1], dict) else launch if isinstance(launch, dict) else {}
-                sid = last.get("session")
+                sid = last.get("session") or (state.get("pi_session") if isinstance(state, dict) else None)
                 if not isinstance(sid, str) or sid == current:
                     continue
                 transcript = last.get("transcript")
@@ -195,6 +195,8 @@ def sweep_state(current: str) -> None:
                         and time.time() - os.path.getmtime(transcript) <= ORPHAN_AGE:
                     continue  # долгий ход без событий хука: сессия жива, её транскрипт растёт
                 if runs:  # отрезки молчащей сессии дописать; её запуск живёт до своей паузы
+                    if last.get("harness") == "pi":
+                        continue  # Отрезок Pi требует выбранной ветки штатного JSONL.
                     orphan = {"session_id": sid, "transcript_path": last.get("transcript")}
                 elif age > IDLE_CLOSE:  # запуск истёк, отрезков нет — состояние сессии больше не нужно
                     with state_of(sid) as st:
