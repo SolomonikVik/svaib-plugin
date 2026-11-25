@@ -10,7 +10,7 @@ file_patterns: ["_делаем.md", "[0-9][0-9]_active.md"]
 
 ## Миссия
 
-Файл вида `_делаем.md`. Показывает, **что по этому узлу в работе прямо сейчас**. Обновляется по ходу работы и не превращается в архив ([management-kit:56–69](https://github.com/SolomonikVik/svaib/blob/v0.11.0/product/methodology/space/scaffold/management-kit.md#L56)).
+Файл вида `_делаем.md`. Показывает, **что по этому узлу в работе прямо сейчас**. Обновляется по ходу работы и не превращается в архив ([management-kit:56–69](https://github.com/SolomonikVik/svaib/blob/v0.12.0/%D0%BF%D1%80%D0%BE%D0%B4%D1%83%D0%BA%D1%82/methodology/space/scaffold/management-kit.md#L56)).
 
 **Граница:** не `backlog` и не архив. Рабочая панель, а не склад критериев и не место стабильного контракта: устойчивая договорённость о том, как что устроено, живёт в `overview` или в смысловом файле.
 
@@ -55,7 +55,7 @@ file_patterns: ["_делаем.md", "[0-9][0-9]_active.md"]
 
 Договорённость, исполненная до момента разбора, заново не заводится — она уже закрыта.
 
-**Повестка ближайшей встречи.** Блок канон в `active` держит ([management-kit:63](https://github.com/SolomonikVik/svaib/blob/v0.11.0/product/methodology/space/scaffold/management-kit.md#L63)); ведёт его человек, разбор пишет в него только прозвучавшие дату и статус следующей встречи.
+**Повестка ближайшей встречи.** Блок канон в `active` держит ([management-kit:63](https://github.com/SolomonikVik/svaib/blob/v0.12.0/%D0%BF%D1%80%D0%BE%D0%B4%D1%83%D0%BA%D1%82/methodology/space/scaffold/management-kit.md#L63)); ведёт его человек, разбор пишет в него только прозвучавшие дату и статус следующей встречи.
 
 ## Закрытие и обновление записей
 
@@ -63,7 +63,7 @@ file_patterns: ["_делаем.md", "[0-9][0-9]_active.md"]
 
 ## Здоровый размер и признаки раздутости
 
-Ориентир <300 строк; QA-гейт узла судит форму, а не наполненность — пустой `_делаем` штатное состояние ([deployment-node-review:26](https://github.com/SolomonikVik/svaib/blob/v0.11.0/product/methodology/space/scaffold/deployment-node-review.md#L26)). Здоровый файл читается целиком как панель: за минуту видно, что горит.
+Ориентир <300 строк; QA-гейт узла судит форму, а не наполненность — пустой `_делаем` штатное состояние ([deployment-node-review:26](https://github.com/SolomonikVik/svaib/blob/v0.12.0/%D0%BF%D1%80%D0%BE%D0%B4%D1%83%D0%BA%D1%82/methodology/space/scaffold/deployment-node-review.md#L26)). Здоровый файл читается целиком как панель: за минуту видно, что горит.
 
 Раздутость:
 

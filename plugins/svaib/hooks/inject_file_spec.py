@@ -29,6 +29,9 @@ Inline Python разбирается статически: присваиван�
 Не ловятся запись через переменную оболочки, `find -exec`, скрипт-файл, пишущий сам, и чтение спецификации
 агентом самим. Хук — перила для невраждебного агента, не замок.
 
+Относительные ссылки спецификации на существующие файлы раскрываются в абсолютный путь на этой машине:
+спецификация приходит в причине отказа без своего адреса. Внешние адреса, якоря и битые цели не трогаются.
+
 Разбор оболочки, корень пространства и state-каталог — из соседнего `inject_space_map.py`: один
 разбор на оба хука (снятие обёртки Codex, JS code-mode, имена shell-инструментов).
 
@@ -802,9 +805,31 @@ def version_note(root: str, sdir: str) -> str:
             "описывают новую структуру. Предложи пользователю обновить пространство скиллом `space-scaffold`.")
 
 
+LOCAL_LINK = re.compile(r"(?<!!)(\[[^\]\n]+\]\()([^)\s]+)(\))")
+
+
+def absolute_links(sdir: str, text: str) -> str:
+    """Относительная ссылка спецификации — в абсолютный путь на этой машине.
+
+    Спецификация приходит в причине отказа без своего адреса: относительная ссылка
+    (`../../onboarding/references/…` в плагине) агенту ничего не говорит. Раскрывается
+    только ссылка на существующий файл; внешние адреса, якоря и битые цели не трогаются.
+    """
+    def resolve(m: re.Match) -> str:
+        href = m[2]
+        if re.match(r"^[a-z][a-z0-9+.-]*:", href, re.I) or href.startswith(("#", "/", "//")):
+            return m[0]
+        path, sep, frag = href.partition("#")
+        target = os.path.normpath(os.path.join(sdir, path))
+        if not os.path.isfile(target):
+            return m[0]
+        return f"{m[1]}{target.replace(os.sep, '/')}{sep}{frag}{m[3]}"
+    return LOCAL_LINK.sub(resolve, text)
+
+
 def read_spec(sdir: str, spec: str) -> str:
     with open(os.path.join(sdir, spec), encoding="utf-8-sig") as f:
-        return f.read().strip()
+        return absolute_links(os.path.abspath(sdir), f.read().strip())
 
 
 def listed(paths: list[str]) -> str:

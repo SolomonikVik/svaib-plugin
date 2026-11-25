@@ -14,22 +14,21 @@
 # 1,2 МБ, за лимит вызова.
 # Список файлов даёт одна маленькая выдача jsDelivr. Её нет — списка и не нужно: канон объявляет
 # себя сам, скрипт берёт README канона и добирает то, на что он ссылается, тем же залпом.
-# Кэш: ${TMPDIR:-/tmp}/svaib-canon/<ref> — символическая ссылка на каталог <ref>@<sha>,
+# Кэш: ${TMPDIR:-/tmp}/svaib-canon/<ref> — ссылка на каталог <ref>@<путь>@<sha>,
 # переключается атомарно, поэтому параллельные вызовы и читатели друг другу не мешают;
-# свежее суток — не качается, старше — перекачивается (не вышло — отдаёт старый с STALE=).
+# при том же commit полный снимок переиспользуется, а снимок без списка повторно проверяет список.
+# Если проверить commit не вышло, пробуем raw по имени ref; без сети отдаём целый старый кэш с STALE=.
 # Выход: 0 — CANON= (путь к канону), SNAPSHOT= (отпечаток содержимого) и VIA= (каким путём
 # приехал) напечатаны; 1 — канон недоступен: без него хранитель не работает, это отказ, не повод
 # судить по памяти. Причина отказа названа: сеть, лимит GitHub ограничил запросы, ref не найден,
 # нет curl.
-# Сеть: raw.githubusercontent.com (файлы) и data.jsdelivr.com (список). В Cowork нужны в allowlist
-# оба; закрыт jsDelivr — канон всё равно приедет, закрыт raw — это отказ. Лимит api.github.com не
-# тратится: этот домен не используется.
+# Сеть: raw.githubusercontent.com (файлы), github.com (проверка свежести кэша),
+# data.jsdelivr.com (список). Два последних необязательны, api.github.com не используется.
 set -euo pipefail
 
 REPO="SolomonikVik/svaib"
 REF="main"
 FORCE=0
-MAX_AGE=86400
 BATCH=16           # столько запросов в залпе: весь канон уходит одним; больше — риск упереться в лимит raw
 MAX_EXTRA=40       # предохранитель добора по ссылкам
 BUDGET=35          # секунд на выгрузку: вызов в Cowork живёт 45, добор в этот потолок не лезет
@@ -52,19 +51,46 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # отдельным выпуском, а кэш на машине мог остаться от прежнего адреса. Поэтому
 # адрес выбирается дважды: для кэша — по диску, без сети; для выгрузки — вопросом
 # к публичному релизу, и только когда выгрузка действительно нужна.
-CANON_REL_NEW="product/methodology/space/scaffold"
-CANON_REL_LEGACY="product/methodology/scaffold"
+CANON_REL_NEW="продукт/methodology/space/scaffold"
+CANON_PATHS=("$CANON_REL_NEW" "product/methodology/space/scaffold" "product/methodology/scaffold")
 CANON_REL="$CANON_REL_NEW"
 ROOT="${TMPDIR:-/tmp}/svaib-canon"
 REF_KEY="${REF//\//%2F}"   # биекция: «feature/x» и «feature_x» не делят кэш
 LINK="$ROOT/$REF_KEY"
 LIST_URL="${SVAIB_CANON_LIST_URL:-https://data.jsdelivr.com/v1/packages/gh}"
 RAW_URL="${SVAIB_CANON_RAW_URL:-https://raw.githubusercontent.com}"
-
-# кэш прежнего адреса остаётся рабочим, пока не выгружен свежий снимок
-if [[ ! -f "$LINK/$CANON_REL/README.md" && -f "$LINK/$CANON_REL_LEGACY/README.md" ]]; then
-  CANON_REL="$CANON_REL_LEGACY"
+REFS_URL="${SVAIB_CANON_REFS_URL:-}"
+if [[ -z "$REFS_URL" && -z "${SVAIB_CANON_RAW_URL:-}" ]]; then
+  REFS_URL="https://github.com/$REPO.git/info/refs?service=git-upload-pack"
 fi
+FETCH_REF="$REF"
+revision=""
+
+raw_url() {
+  local encoded
+  encoded="$(python3 -c 'from urllib.parse import quote; import sys; print(quote(sys.argv[1], safe="/"))' "$1")" || return
+  printf '%s/%s/%s/%s' "$RAW_URL" "$REPO" "$FETCH_REF" "$encoded"
+}
+
+# GitHub advertises refs in pkt-lines: four hex length digits, then the SHA.
+# Prefer a branch to an identically named tag and peel annotated tags.
+remote_revision() {
+  curl -fsSL --max-time 4 -H 'Cache-Control: no-cache' "$REFS_URL" 2>/dev/null | awk -v ref="$REF" '
+    length($1) == 44 && $1 ~ /^[0-9a-f]+$/ {
+      if ($2 == "refs/heads/" ref) branch = substr($1, 5)
+      if ($2 == "refs/tags/" ref "^{}") peeled = substr($1, 5)
+      if ($2 == "refs/tags/" ref) tag = substr($1, 5)
+    }
+    END { print (branch ? branch : (peeled ? peeled : tag)) }'
+}
+
+# Кэш прежнего адреса остаётся рабочим, пока не выгружен свежий снимок.
+for path in "${CANON_PATHS[@]}"; do
+  if [[ -f "$LINK/$path/README.md" ]]; then
+    CANON_REL="$path"
+    break
+  fi
+done
 CACHE_REL="$CANON_REL"
 
 fail() { echo "канон недоступен: $*" >&2; exit 1; }
@@ -75,11 +101,10 @@ emit_unverified() {
   fi
 }
 
-# метаданные снимка: пишутся целиком и при первой выгрузке, и при её повторении — «возраст»
-# всегда одна строка, поэтому кэш живёт сутки от последней выгрузки, а файл не растёт
+# Метаданные обновляются целиком. Возраст нужен для сообщения о несвежем кэше.
 write_meta() {
-  printf 'ref: %s\nsnapshot: %s\nvia: %s\nfiles: %s\nfetched_epoch: %s\nfetched_at: %s\nsource: https://github.com/%s\n' \
-    "$REF" "$sha" "$VIA" "$(find "$1/$CANON_REL" -type f | wc -l | tr -d ' ')" \
+  printf 'ref: %s\nrevision: %s\nsnapshot: %s\nvia: %s\nfiles: %s\nfetched_epoch: %s\nfetched_at: %s\nsource: https://github.com/%s\n' \
+    "$REF" "$revision" "$sha" "$VIA" "$(find "$1/$CANON_REL" -type f | wc -l | tr -d ' ')" \
     "$(date +%s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REPO" > "$1/FETCHED.txt"
 }
 
@@ -114,9 +139,20 @@ cache_intact() {  # проверяем состав и содержимое, а 
   [[ "$actual" == "$(current_sha)" ]]
 }
 
+if [[ -n "$REFS_URL" ]]; then
+  revision="$(remote_revision)" || revision=""
+  [[ -z "$revision" ]] || FETCH_REF="$revision"
+fi
+retry_listing=0
 if [[ $FORCE -eq 0 ]] && cache_intact; then
-  age="$(current_age)"
-  if [[ "$age" -lt $MAX_AGE ]]; then emit "$LINK" "$(current_sha)"; echo "VIA=cache"; emit_unverified "$LINK"; exit 0; fi
+  cached_revision="$(sed -n 's/^revision: //p' "$LINK/FETCHED.txt" | tail -1)"
+  if [[ -n "$revision" && "$revision" == "$cached_revision" ]]; then
+    if [[ "$(sed -n 's/^via: //p' "$LINK/FETCHED.txt" | tail -1)" == "raw:walk" ]]; then
+      retry_listing=1
+    else
+      emit "$LINK" "$(current_sha)"; echo "VIA=cache"; exit 0
+    fi
+  fi
 fi
 
 command -v curl >/dev/null || fail "нет curl"
@@ -128,15 +164,19 @@ trap 'rm -rf "$work"' EXIT
 top="$work/tree"
 mkdir -p "$top"
 
-# По какому адресу канон лежит в публичном релизе: новый путь, откат на прежний.
-# Сеть недоступна (curl 6/7/28) — второй вопрос не задаём, дальше отказ уйдёт в кэш.
-CANON_REL="$CANON_REL_NEW"
-probe_rc=0
-curl -fsL --max-time 10 -o /dev/null "${RAW_URL}/${REPO}/${REF}/${CANON_REL_NEW}/README.md" 2>/dev/null || probe_rc=$?
-if [[ $probe_rc -ne 0 && $probe_rc -ne 6 && $probe_rc -ne 7 && $probe_rc -ne 28 ]]; then
-  if curl -fsL --max-time 10 -o /dev/null "${RAW_URL}/${REPO}/${REF}/${CANON_REL_LEGACY}/README.md" 2>/dev/null; then
-    CANON_REL="$CANON_REL_LEGACY"
-  fi
+# При повторной проверке списка адрес уже известен из кэша того же commit.
+if (( ! retry_listing )); then
+  # У старых релизов канон остаётся по прежнему адресу.
+  # При недоступной сети (curl 6/7/28) другие адреса не пробуем.
+  CANON_REL="$CANON_REL_NEW"
+  for path in "${CANON_PATHS[@]}"; do
+    probe_rc=0
+    curl -fsL --max-time 10 -o /dev/null "$(raw_url "$path/README.md")" 2>/dev/null || probe_rc=$?
+    case "$probe_rc" in
+      0) CANON_REL="$path"; break ;;
+      6|7|28) break ;;
+    esac
+  done
 fi
 
 stale_or_fail() {
@@ -154,7 +194,7 @@ stale_or_fail() {
 list_canon_files() {
   local out="$work/listing.json" code
   if ! code="$(curl -sSL --connect-timeout 10 --max-time 15 -w '%{http_code}' \
-    "${LIST_URL}/${REPO}@${REF}?structure=flat" -o "$out.part" 2>/dev/null)"; then
+    "${LIST_URL}/${REPO}@${FETCH_REF}?structure=flat" -o "$out.part" 2>/dev/null)"; then
     rm -f "$out.part"
     return 1
   fi
@@ -169,7 +209,7 @@ list_canon_files() {
 download_file() {
   local f="$1" part
   part="$(mktemp "$work/download.XXXXXX")"
-  if curl -fsS --retry 1 --connect-timeout 10 --max-time 25 -o "$part" "${RAW_URL}/${REPO}/${REF}/${f}" 2>/dev/null; then
+  if curl -fsS --retry 1 --connect-timeout 10 --max-time 25 -o "$part" "$(raw_url "$f")" 2>/dev/null; then
     mv "$part" "$top/$f"
   else
     rm -f "$part"
@@ -263,6 +303,9 @@ extra_from_links() {
 
 VIA="raw"; LISTED=1
 if ! list_canon_files; then
+  if (( retry_listing )) && cache_intact; then
+    emit "$LINK" "$(current_sha)"; echo "VIA=cache"; emit_unverified "$LINK"; exit 0
+  fi
   # списка нет: служебные имена — попытка, а не обещание; обязателен только README
   printf "$CANON_REL/%s\n" $SEED > "$work/files.txt"
   VIA="raw:walk"; LISTED=0
@@ -279,7 +322,7 @@ fi
 if [[ ! -s "$top/$CANON_REL/README.md" ]]; then
   # один диагностический запрос — только на отказе: без него причину не назвать
   code="$(curl -sSL --connect-timeout 10 --max-time 20 -w '%{http_code}' -o /dev/null \
-    "${RAW_URL}/${REPO}/${REF}/${CANON_REL}/README.md" 2>/dev/null || true)"
+    "$(raw_url "$CANON_REL/README.md")" 2>/dev/null || true)"
   case "$code" in
     404) stale_or_fail "ref «$REF» в ${REPO} не найден (HTTP 404)" ;;
     403|429) stale_or_fail "GitHub ограничил запросы (HTTP $code) — повторить позже" ;;
@@ -329,11 +372,10 @@ fi
 
 # --- публикация в кэш -------------------------------------------------------------------------
 
-# источник не сообщает коммит — идентификатор снимка считается по содержимому канона:
-# одно содержимое → один каталог кэша, повторная выгрузка того же не плодит копий
+# Отпечаток отражает содержимое. Каталог кэша различает также раскладку путей.
 sha="$(python3 "$SELF_DIR/snapshot_id.py" "$top/$CANON_REL")" || fail "не посчитать отпечаток снимка"
 
-dest="$ROOT/${REF_KEY}@${sha}"
+dest="$ROOT/${REF_KEY}@${CANON_REL//\//%2F}@${sha}"
 # снимок с тем же адресом мог повредиться: проверяем и состав, и содержимое
 if [[ -f "$dest/$CANON_REL/README.md" ]]; then
   have="$(find "$dest/$CANON_REL" -type f | wc -l | tr -d ' ')"

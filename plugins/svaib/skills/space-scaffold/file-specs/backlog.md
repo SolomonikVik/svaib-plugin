@@ -10,7 +10,7 @@ file_patterns: ["_планы.md", "[0-9][0-9]_backlog.md"]
 
 ## Миссия
 
-Файл вида `_планы.md`. Хранит работу, которая важна, но не находится в текущем активе: задачи, проекты, идеи и гипотезы на потом. Разгружает [active](active.md), чтобы текущий фокус не смешивался с будущей работой ([management-kit:71–84](https://github.com/SolomonikVik/svaib/blob/v0.11.0/product/methodology/space/scaffold/management-kit.md#L71)).
+Файл вида `_планы.md`. Хранит работу, которая важна, но не находится в текущем активе: задачи, проекты, идеи и гипотезы на потом. Разгружает [active](active.md), чтобы текущий фокус не смешивался с будущей работой ([management-kit:71–84](https://github.com/SolomonikVik/svaib/blob/v0.12.0/%D0%BF%D1%80%D0%BE%D0%B4%D1%83%D0%BA%D1%82/methodology/space/scaffold/management-kit.md#L71)).
 
 **Граница:** не актив и не архив.
 

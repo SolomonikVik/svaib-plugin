@@ -10,7 +10,7 @@ file_patterns: ["_решения.md", "[0-9][0-9]_decisions.md"]
 
 ## Миссия
 
-Файл вида `_решения.md`. Реестр решений по узлу: что принято, кем и почему, отвергнутые варианты — если обсуждались, что это меняет ([management-kit:93–108](https://github.com/SolomonikVik/svaib/blob/v0.11.0/product/methodology/space/scaffold/management-kit.md#L93)).
+Файл вида `_решения.md`. Реестр решений по узлу: что принято, кем и почему, отвергнутые варианты — если обсуждались, что это меняет ([management-kit:93–108](https://github.com/SolomonikVik/svaib/blob/v0.12.0/%D0%BF%D1%80%D0%BE%D0%B4%D1%83%D0%BA%D1%82/methodology/space/scaffold/management-kit.md#L93)).
 
 **Граница:** что происходило с объектом — в [хронике](progress.md).
 
